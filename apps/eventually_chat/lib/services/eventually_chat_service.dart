@@ -1,7 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -295,8 +293,6 @@ class EventuallyChatService with ChangeNotifier {
   /// Get overall connection statistics.
   Future<Map<String, dynamic>> getConnectionStats() async {
     final syncStats = await getSyncStats();
-    final dagStats = getDAGStats();
-    final peerStats = await getPeerStats();
     final storeStats = await _store.getStats();
 
     return {

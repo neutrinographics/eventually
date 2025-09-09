@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:eventually/eventually.dart';
@@ -201,7 +200,7 @@ class HiveDAGStore implements Store {
 
     try {
       final cidString = cid.toString();
-      final metadata = await _metadataBox!.get(cidString);
+      final metadata = _metadataBox!.get(cidString);
       if (metadata != null) {
         final metadataMap = Map<String, dynamic>.from(metadata);
         return metadataMap['size'] as int?;
@@ -301,7 +300,7 @@ class HiveDAGStore implements Store {
       final keyString = key.toString();
       if (!reachable.contains(keyString)) {
         toRemove.add(keyString);
-        final metadata = await _metadataBox!.get(keyString);
+        final metadata = _metadataBox!.get(keyString);
         if (metadata != null) {
           final metadataMap = Map<String, dynamic>.from(metadata);
           bytesFreed += metadataMap['size'] as int? ?? 0;
@@ -395,7 +394,7 @@ class HiveDAGStore implements Store {
     try {
       final blocks = <Block>[];
       for (final key in _metadataBox!.keys) {
-        final metadata = await _metadataBox!.get(key);
+        final metadata = _metadataBox!.get(key);
         if (metadata != null) {
           final metadataMap = Map<String, dynamic>.from(metadata);
           if (metadataMap['codec'] == codec) {
