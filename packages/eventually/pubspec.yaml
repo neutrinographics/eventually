@@ -1,0 +1,27 @@
+name: eventually
+description: A Dart library for Merkle DAG synchronization with IPFS-like protocols, supporting distributed content-addressed storage and peer-to-peer sync
+version: 1.0.0
+homepage: https://github.com/da1nerd/eventually-mono
+repository: https://github.com/da1nerd/eventually-mono
+issue_tracker: https://github.com/da1nerd/eventually-mono/issues
+documentation: https://github.com/da1nerd/eventually-mono/tree/main/packages/eventually
+
+environment:
+  sdk: ">=3.9.0 <4.0.0"
+
+resolution: workspace
+
+dependencies:
+  meta: ^1.12.0
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^4.0.0
+
+topics:
+  - merkle-dag
+  - ipfs
+  - content-addressed-storage
+  - peer-to-peer
+  - distributed-systems
+  - synchronization

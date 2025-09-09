@@ -1,0 +1,52 @@
+# Dart/Flutter specific
+.dart_tool/
+.packages
+pubspec.lock
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# IDE specific
+.vscode/
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.so
+*.dylib
+*.dll
+
+# Coverage reports
+coverage/
+*.lcov
+
+# Test artifacts
+test/.test_coverage.dart
+
+# Documentation
+doc/api/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Node modules (if using any JS tooling)
+node_modules/
+
+# Melos artifacts
+.melos_tool_cache/
+
+# Eventually specific
+# Add any project-specific ignore patterns here
