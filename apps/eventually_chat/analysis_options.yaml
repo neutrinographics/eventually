@@ -1,0 +1,28 @@
+include: package:flutter_lints/flutter.yaml
+
+# Additional lint rules and analysis options
+linter:
+  rules:
+    # Enable additional helpful lints
+    prefer_single_quotes: true
+    prefer_relative_imports: true
+    sort_constructors_first: true
+    sort_pub_dependencies: true
+
+    # Disable overly strict rules for demo code
+    public_member_api_docs: false
+    lines_longer_than_80_chars: false
+    avoid_print: false
+
+analyzer:
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+
+  errors:
+    # Treat missing required parameters as errors
+    missing_required_param: error
+    # Treat missing return statements as errors
+    missing_return: error
+    # Allow unused imports (common in development)
+    unused_import: ignore

@@ -1,0 +1,185 @@
+import 'package:eventually/eventually.dart';
+
+/// Represents a peer in the chat system.
+///
+/// Peers are other users who are participating in the chat network.
+/// Each peer has a unique ID, display name, and connection status.
+class ChatPeer {
+  final String id;
+  final String name;
+  final String? address;
+  final DateTime connectedAt;
+  final ChatPeerStatus status;
+  final bool isOnline;
+  final DateTime? lastSeen;
+  final Set<CID> knownBlocks;
+
+  ChatPeer({
+    required this.id,
+    required this.name,
+    this.address,
+    DateTime? connectedAt,
+    this.status = ChatPeerStatus.connected,
+    this.isOnline = true,
+    this.lastSeen,
+    Set<CID>? knownBlocks,
+  }) : connectedAt = connectedAt ?? DateTime.now(),
+       knownBlocks = knownBlocks ?? <CID>{};
+
+  /// Creates a peer from an Eventually library Peer object.
+  factory ChatPeer.fromPeer(
+    Peer peer, {
+    required String name,
+    ChatPeerStatus? status,
+    bool? isOnline,
+    DateTime? lastSeen,
+    Set<CID>? knownBlocks,
+  }) {
+    return ChatPeer(
+      id: peer.id,
+      name: name,
+      address: peer.address,
+      status: status ?? ChatPeerStatus.connected,
+      isOnline: isOnline ?? true,
+      lastSeen: lastSeen,
+      knownBlocks: knownBlocks,
+    );
+  }
+
+  /// Creates a copy of this peer with updated properties.
+  ChatPeer copyWith({
+    String? id,
+    String? name,
+    String? address,
+    DateTime? connectedAt,
+    ChatPeerStatus? status,
+    bool? isOnline,
+    DateTime? lastSeen,
+    Set<CID>? knownBlocks,
+  }) {
+    return ChatPeer(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      address: address ?? this.address,
+      connectedAt: connectedAt ?? this.connectedAt,
+      status: status ?? this.status,
+      isOnline: isOnline ?? this.isOnline,
+      lastSeen: lastSeen ?? this.lastSeen,
+      knownBlocks: knownBlocks ?? Set<CID>.from(this.knownBlocks),
+    );
+  }
+
+  /// Marks this peer as having a specific block.
+  ChatPeer withKnownBlock(CID cid) {
+    final newKnownBlocks = Set<CID>.from(knownBlocks)..add(cid);
+    return copyWith(knownBlocks: newKnownBlocks);
+  }
+
+  /// Marks this peer as having multiple blocks.
+  ChatPeer withKnownBlocks(Set<CID> cids) {
+    final newKnownBlocks = Set<CID>.from(knownBlocks)..addAll(cids);
+    return copyWith(knownBlocks: newKnownBlocks);
+  }
+
+  /// Whether this peer is known to have a specific block.
+  bool hasBlock(CID cid) {
+    return knownBlocks.contains(cid);
+  }
+
+  /// Gets the number of blocks this peer is known to have.
+  int get knownBlockCount => knownBlocks.length;
+
+  /// Whether this peer is currently active (connected and online).
+  bool get isActive => status == ChatPeerStatus.connected && isOnline;
+
+  /// Gets a display-friendly connection duration.
+  Duration get connectionDuration {
+    return DateTime.now().difference(connectedAt);
+  }
+
+  /// Gets a display-friendly last seen duration (if offline).
+  Duration? get lastSeenDuration {
+    if (lastSeen == null) return null;
+    return DateTime.now().difference(lastSeen!);
+  }
+
+  /// Converts the peer to JSON for serialization.
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'address': address,
+      'connectedAt': connectedAt.millisecondsSinceEpoch,
+      'status': status.name,
+      'isOnline': isOnline,
+      'lastSeen': lastSeen?.millisecondsSinceEpoch,
+      'knownBlocks': knownBlocks.map((cid) => cid.toString()).toList(),
+    };
+  }
+
+  /// Creates a peer from JSON data.
+  factory ChatPeer.fromJson(Map<String, dynamic> json) {
+    return ChatPeer(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      address: json['address'] as String?,
+      connectedAt: DateTime.fromMillisecondsSinceEpoch(
+        json['connectedAt'] as int,
+      ),
+      status: ChatPeerStatus.values.firstWhere(
+        (e) => e.name == json['status'],
+        orElse: () => ChatPeerStatus.connected,
+      ),
+      isOnline: json['isOnline'] as bool? ?? true,
+      lastSeen: json['lastSeen'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(json['lastSeen'] as int)
+          : null,
+      knownBlocks:
+          (json['knownBlocks'] as List<dynamic>?)
+              ?.map((cidString) => CID.parse(cidString as String))
+              .toSet() ??
+          <CID>{},
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ChatPeer && runtimeType == other.runtimeType && id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
+
+  @override
+  String toString() {
+    return 'ChatPeer(id: $id, name: $name, status: $status, '
+        'isOnline: $isOnline, knownBlocks: ${knownBlocks.length})';
+  }
+}
+
+/// The connection status of a chat peer.
+enum ChatPeerStatus { connecting, connected, disconnected, failed, syncing }
+
+/// Extension methods for ChatPeerStatus.
+extension ChatPeerStatusExtension on ChatPeerStatus {
+  /// Gets a user-friendly display name for the status.
+  String get displayName {
+    switch (this) {
+      case ChatPeerStatus.connecting:
+        return 'Connecting';
+      case ChatPeerStatus.connected:
+        return 'Connected';
+      case ChatPeerStatus.disconnected:
+        return 'Disconnected';
+      case ChatPeerStatus.failed:
+        return 'Connection Failed';
+      case ChatPeerStatus.syncing:
+        return 'Synchronizing';
+    }
+  }
+
+  /// Whether this status indicates the peer is available for communication.
+  bool get isAvailable {
+    return this == ChatPeerStatus.connected || this == ChatPeerStatus.syncing;
+  }
+}

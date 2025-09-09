@@ -1,0 +1,38 @@
+name: eventually_chat
+description: A Flutter chat app demonstrating Merkle DAG synchronization using the Eventually library for distributed content-addressed storage.
+publish_to: "none"
+version: 1.0.0+1
+homepage: https://github.com/da1nerd/eventually-mono
+repository: https://github.com/da1nerd/eventually-mono
+issue_tracker: https://github.com/da1nerd/eventually-mono/issues
+
+environment:
+  sdk: ">=3.9.0 <4.0.0"
+  flutter: ">=3.16.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.2
+
+  eventually:
+    path: ../../packages/eventually
+  permission_handler: ^11.3.1
+  location: ^5.0.3
+  device_info_plus: ^9.1.0
+  uuid: ^4.0.0
+  shared_preferences: ^2.2.2
+  provider: ^6.1.1
+  intl: ^0.18.1
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  path_provider: ^2.1.1
+  crypto: ^3.0.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+
+flutter:
+  uses-material-design: true
