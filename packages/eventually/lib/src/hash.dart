@@ -1,5 +1,4 @@
 import 'dart:typed_data';
-import 'package:meta/meta.dart';
 
 /// Interface for hash functions used in content addressing.
 ///

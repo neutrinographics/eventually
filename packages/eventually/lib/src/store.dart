@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 import 'package:meta/meta.dart';
 import 'block.dart';
 import 'cid.dart';
