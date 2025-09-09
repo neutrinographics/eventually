@@ -216,8 +216,16 @@ class CID {
   }
 
   static Uint8List _base32Decode(String input) {
-    // Simplified placeholder - just return empty bytes for now
-    return Uint8List(0);
+    // Simplified placeholder - decode hex representation for now
+    if (input.length % 2 != 0)
+      throw FormatException('Invalid hex string length');
+
+    final bytes = <int>[];
+    for (int i = 0; i < input.length; i += 2) {
+      final hex = input.substring(i, i + 2);
+      bytes.add(int.parse(hex, radix: 16));
+    }
+    return Uint8List.fromList(bytes);
   }
 
   static String _base32Encode(Uint8List bytes) {

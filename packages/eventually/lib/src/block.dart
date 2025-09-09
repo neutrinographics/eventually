@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:meta/meta.dart';
 import 'cid.dart';
@@ -199,7 +200,45 @@ class Block {
 
   List<CID> _extractDagJsonLinks() {
     // Parse JSON data for CID objects (typically in {"/": "cid"} format)
-    throw UnimplementedError('DAG-JSON link extraction not implemented');
+    try {
+      final jsonString = utf8.decode(data);
+      final jsonData = jsonDecode(jsonString);
+      final links = <CID>[];
+      _extractLinksFromJson(jsonData, links);
+      return links;
+    } catch (e) {
+      // If parsing fails, return empty list (no links found)
+      return [];
+    }
+  }
+
+  void _extractLinksFromJson(dynamic json, List<CID> links) {
+    if (json is Map<String, dynamic>) {
+      // Check if this is a CID object: {"/": "cid_string"}
+      if (json.length == 1 && json.containsKey('/')) {
+        final cidString = json['/'];
+        if (cidString is String) {
+          try {
+            final parsedCid = CID.parse(cidString);
+            links.add(parsedCid);
+          } catch (e) {
+            // Invalid CID, skip it
+          }
+        }
+        return;
+      }
+
+      // Recursively check all values in the map
+      for (final value in json.values) {
+        _extractLinksFromJson(value, links);
+      }
+    } else if (json is List) {
+      // Recursively check all items in the list
+      for (final item in json) {
+        _extractLinksFromJson(item, links);
+      }
+    }
+    // For primitive types (String, int, bool, null), do nothing
   }
 
   static bool _listEquals(List<int> a, List<int> b) {

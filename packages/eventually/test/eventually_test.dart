@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:test/test.dart';
 import 'package:eventually/eventually.dart';
@@ -68,6 +69,45 @@ void main() {
       // Raw blocks should have no links
       final links = block.extractLinks();
       expect(links, isEmpty);
+    });
+
+    test('CID creation and parsing works', () {
+      // Create a simple CID using identity hash (which should work)
+      final testData = Uint8List.fromList([1, 2, 3, 4, 5]);
+      final testHash = Multihash.fromDigest(MultiHashCode.identity, testData);
+      final testCid = CID.v1(codec: MultiCodec.raw, multihash: testHash);
+
+      // Verify CID can be parsed back
+      final parsedCid = CID.parse(testCid.toString());
+      expect(parsedCid.toString(), equals(testCid.toString()));
+    });
+
+    test('extracts links from DAG-JSON blocks', () {
+      // Use a known good CID format for testing
+      final testData = Uint8List.fromList([1, 2, 3, 4, 5]);
+      final testHash = Multihash.fromDigest(MultiHashCode.identity, testData);
+      final testCid = CID.v1(codec: MultiCodec.raw, multihash: testHash);
+
+      // Create JSON with CID links
+      final jsonData = {
+        'message': 'hello',
+        'parent': {'/': testCid.toString()},
+        'simple_link': {'/': testCid.toString()},
+      };
+
+      final jsonString = jsonEncode(jsonData);
+      final jsonBytes = Uint8List.fromList(utf8.encode(jsonString));
+      final jsonBlock = Block.fromData(jsonBytes, codec: MultiCodec.dagJson);
+
+      // Extract links
+      final links = jsonBlock.extractLinks();
+
+      // Should find 2 instances of the same CID
+      expect(links, hasLength(2));
+      expect(
+        links.every((link) => link.toString() == testCid.toString()),
+        isTrue,
+      );
     });
   });
 
