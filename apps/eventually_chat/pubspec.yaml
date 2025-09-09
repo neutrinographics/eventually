@@ -2,9 +2,9 @@ name: eventually_chat
 description: A Flutter chat app demonstrating Merkle DAG synchronization using the Eventually library for distributed content-addressed storage.
 publish_to: "none"
 version: 1.0.0+1
-homepage: https://github.com/da1nerd/eventually-mono
-repository: https://github.com/da1nerd/eventually-mono
-issue_tracker: https://github.com/da1nerd/eventually-mono/issues
+homepage: https://github.com/neutrinographics/eventually
+repository: https://github.com/neutrinographics/eventually
+issue_tracker: https://github.com/neutrinographics/eventually/issues
 
 environment:
   sdk: ">=3.9.0 <4.0.0"

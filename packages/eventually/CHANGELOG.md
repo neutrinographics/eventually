@@ -73,4 +73,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Compression and deduplication features
 - Performance optimizations and benchmarks
 
-[1.0.0]: https://github.com/da1nerd/eventually-mono/releases/tag/eventually-v1.0.0
+[1.0.0]: https://github.com/neutrinographics/eventually/releases/tag/eventually-v1.0.0

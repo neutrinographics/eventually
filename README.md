@@ -39,8 +39,8 @@ This monorepo contains packages that work together to provide:
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/da1nerd/eventually-mono.git
-cd eventually-mono
+git clone https://github.com/neutrinographics/eventually.git
+cd eventually
 ```
 
 2. Install dependencies:
@@ -247,8 +247,8 @@ We welcome contributions! Please:
 
 ```bash
 # Clone and setup
-git clone https://github.com/da1nerd/eventually-mono.git
-cd eventually-mono
+git clone https://github.com/neutrinographics/eventually.git
+cd eventually
 melos get-all
 
 # Run pre-commit checks
@@ -269,9 +269,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Support
 
-- [Documentation](https://github.com/da1nerd/eventually-mono/tree/main/packages/eventually)
-- [Issues](https://github.com/da1nerd/eventually-mono/issues)
-- [Discussions](https://github.com/da1nerd/eventually-mono/discussions)
+- [Documentation](https://github.com/neutrinographics/eventually/tree/main/packages/eventually)
+- [Issues](https://github.com/neutrinographics/eventually/issues)
+- [Discussions](https://github.com/neutrinographics/eventually/discussions)
 
 ---
 
