@@ -417,7 +417,7 @@ class NearbyTransportManager implements TransportManager {
     if (_isDiscovering) return;
 
     await Nearby().startDiscovery(
-      NearbyConnectionsPeerManager._serviceId,
+      userName,
       NearbyConnectionsPeerManager._strategy,
       onEndpointFound: _onEndpointFound,
       onEndpointLost: (String? endpointId) {
@@ -425,6 +425,7 @@ class NearbyTransportManager implements TransportManager {
           _onEndpointLost(endpointId);
         }
       },
+      serviceId: NearbyConnectionsPeerManager._serviceId,
     );
 
     _isDiscovering = true;
