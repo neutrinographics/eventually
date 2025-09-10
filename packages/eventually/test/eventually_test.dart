@@ -231,21 +231,43 @@ void main() {
 
   group('Peer', () {
     test('creates peer with metadata', () {
+      final transportPeer = TransportPeer(
+        address: TransportPeerAddress('127.0.0.1:8080'),
+        displayName: 'Test Peer',
+        protocol: 'tcp',
+      );
+
       final peer = Peer(
         id: 'peer-123',
-        address: '127.0.0.1:8080',
+        transportPeer: transportPeer,
         metadata: {'version': '1.0.0'},
       );
 
       expect(peer.id, equals('peer-123'));
-      expect(peer.address, equals('127.0.0.1:8080'));
+      expect(peer.address.value, equals('127.0.0.1:8080'));
       expect(peer.metadata['version'], equals('1.0.0'));
     });
 
     test('equality and hashing work correctly', () {
-      final peer1 = Peer(id: 'peer-123', address: '127.0.0.1:8080');
-      final peer2 = Peer(id: 'peer-123', address: '127.0.0.1:8080');
-      final peer3 = Peer(id: 'peer-456', address: '127.0.0.1:8080');
+      final transportPeer1 = TransportPeer(
+        address: TransportPeerAddress('127.0.0.1:8080'),
+        displayName: 'Test Peer',
+        protocol: 'tcp',
+      );
+      final transportPeer2 = TransportPeer(
+        address: TransportPeerAddress('127.0.0.1:8080'),
+        displayName: 'Test Peer',
+        protocol: 'tcp',
+      );
+      final transportPeer3 = TransportPeer(
+        address: TransportPeerAddress('127.0.0.1:8080'),
+        displayName: 'Different Peer',
+        protocol: 'tcp',
+      );
+
+      final peer1 = Peer(id: 'peer-123', transportPeer: transportPeer1);
+      final peer2 = Peer(id: 'peer-123', transportPeer: transportPeer2);
+      final peer3 = Peer(id: 'peer-456', transportPeer: transportPeer3);
 
       expect(peer1, equals(peer2));
       expect(peer1.hashCode, equals(peer2.hashCode));

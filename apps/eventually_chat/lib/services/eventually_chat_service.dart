@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' hide debugPrint;
+import 'package:flutter/material.dart' hide debugPrint;
 import 'package:eventually/eventually.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
@@ -10,7 +10,7 @@ import 'package:uuid/uuid.dart';
 import '../models/chat_message.dart';
 import '../models/chat_peer.dart';
 import 'hive_dag_store.dart';
-import 'nearby_connections_peer_manager.dart';
+import 'nearby_peer_manager.dart';
 import 'permissions_service.dart';
 
 /// Chat service using the Eventually library for Merkle DAG synchronization.
@@ -33,7 +33,7 @@ class EventuallyChatService with ChangeNotifier {
 
   late final HiveDAGStore _store;
   late final DAG _dag;
-  late final NearbyConnectionsPeerManager _peerManager;
+  late NearbyPeerManager _peerManager;
   late final Synchronizer _synchronizer;
 
   final List<ChatMessage> _messages = [];
@@ -108,9 +108,9 @@ class EventuallyChatService with ChangeNotifier {
       _dag = DAG();
 
       // Initialize peer manager using nearby connections
-      _peerManager = NearbyConnectionsPeerManager(
-        userId: _userId!,
-        userName: _userName!,
+      _peerManager = NearbyPeerManager.nearby(
+        nodeId: _userId!,
+        displayName: _userName!,
       );
 
       // Initialize synchronizer

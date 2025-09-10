@@ -3,28 +3,80 @@ import 'dart:typed_data';
 import 'package:meta/meta.dart';
 import 'cid.dart';
 import 'block.dart';
+import 'transport_endpoint.dart';
 
 /// Represents a peer in the distributed network at the application layer.
 ///
-/// A peer is identified by a unique ID that is discovered during the initial
-/// communication handshake after a transport connection is established.
-/// This abstraction is separate from transport-layer concerns like addresses.
+/// A peer combines application-layer identity (discovered through handshake)
+/// with transport-layer information (how to reach them). This bridges the
+/// transport and application layers after peer identity is established.
 @immutable
 class Peer {
-  /// Creates a peer with the given identifier.
-  const Peer({required this.id, this.metadata = const {}});
+  /// Creates a peer with the given identifier and transport information.
+  Peer({
+    required this.id,
+    required this.transportPeer,
+    this.metadata = const {},
+    DateTime? lastContactTime,
+    this.isActive = true,
+  }) : lastContactTime = lastContactTime ?? DateTime.now();
 
-  /// Unique identifier for this peer.
-  /// This is discovered during initial peer communication, not known beforehand.
+  /// Unique identifier for this peer at the application layer.
+  /// This is discovered during initial peer communication handshake.
   final String id;
+
+  /// Transport-level information for reaching this peer.
+  final TransportPeer transportPeer;
 
   /// Additional application-layer metadata about the peer.
   /// May contain capabilities, preferences, version info, etc.
   final Map<String, dynamic> metadata;
 
+  /// When this peer was last successfully contacted.
+  final DateTime? lastContactTime;
+
+  /// Whether this peer is currently considered active.
+  final bool isActive;
+
+  /// Gets the transport address for this peer.
+  TransportPeerAddress get address => transportPeer.address;
+
+  /// Gets the display name for this peer.
+  String get displayName => transportPeer.displayName;
+
+  /// Gets the transport protocol used by this peer.
+  String get protocol => transportPeer.protocol;
+
   /// Creates a copy of this peer with updated properties.
-  Peer copyWith({String? id, Map<String, dynamic>? metadata}) {
-    return Peer(id: id ?? this.id, metadata: metadata ?? this.metadata);
+  Peer copyWith({
+    String? id,
+    TransportPeer? transportPeer,
+    Map<String, dynamic>? metadata,
+    DateTime? lastContactTime,
+    bool? isActive,
+  }) {
+    return Peer(
+      id: id ?? this.id,
+      transportPeer: transportPeer ?? this.transportPeer,
+      metadata: metadata ?? this.metadata,
+      lastContactTime: lastContactTime ?? this.lastContactTime,
+      isActive: isActive ?? this.isActive,
+    );
+  }
+
+  /// Creates a copy with updated transport peer information.
+  Peer updateTransportPeer(TransportPeer transportPeer) {
+    return copyWith(transportPeer: transportPeer);
+  }
+
+  /// Creates a copy marking the peer as contacted at the current time.
+  Peer markContacted() {
+    return copyWith(lastContactTime: DateTime.now());
+  }
+
+  /// Creates a copy with updated activity status.
+  Peer updateActivity(bool isActive) {
+    return copyWith(isActive: isActive);
   }
 
   @override
@@ -33,13 +85,14 @@ class Peer {
       other is Peer &&
           runtimeType == other.runtimeType &&
           id == other.id &&
-          metadata == other.metadata;
+          transportPeer == other.transportPeer;
 
   @override
-  int get hashCode => Object.hash(id, metadata);
+  int get hashCode => Object.hash(id, transportPeer);
 
   @override
-  String toString() => 'Peer(id: $id)';
+  String toString() =>
+      'Peer(id: $id, address: ${transportPeer.address}, displayName: ${transportPeer.displayName}, protocol: ${transportPeer.protocol}, isActive: $isActive)';
 }
 
 /// Interface for application-layer peer-to-peer communication.

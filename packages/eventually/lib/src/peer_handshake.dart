@@ -82,7 +82,21 @@ class DefaultPeerHandshake implements PeerHandshake {
         try {
           final message = _parseHandshakeMessage(data);
           if (message.type == HandshakeMessageType.response) {
-            final peer = Peer(id: message.peerId, metadata: message.metadata);
+            // Create transport peer from transport connection
+            final transportPeer = TransportPeer(
+              address: TransportPeerAddress(transport.endpoint.address),
+              displayName:
+                  message.metadata['displayName']?.toString() ?? message.peerId,
+              protocol: transport.endpoint.protocol,
+              metadata: transport.endpoint.metadata,
+            );
+
+            // Create peer and connection
+            final peer = Peer(
+              id: message.peerId,
+              transportPeer: transportPeer,
+              metadata: message.metadata,
+            );
             final connection = TransportPeerConnection(
               peer: peer,
               transport: transport,
@@ -155,8 +169,21 @@ class DefaultPeerHandshake implements PeerHandshake {
             );
             await transport.sendData(response.toBytes());
 
+            // Create transport peer from transport connection
+            final transportPeer = TransportPeer(
+              address: TransportPeerAddress(transport.endpoint.address),
+              displayName:
+                  message.metadata['displayName']?.toString() ?? message.peerId,
+              protocol: transport.endpoint.protocol,
+              metadata: transport.endpoint.metadata,
+            );
+
             // Create peer and connection
-            final peer = Peer(id: message.peerId, metadata: message.metadata);
+            final peer = Peer(
+              id: message.peerId,
+              transportPeer: transportPeer,
+              metadata: message.metadata,
+            );
             final connection = TransportPeerConnection(
               peer: peer,
               transport: transport,

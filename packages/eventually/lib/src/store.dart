@@ -595,7 +595,6 @@ class CachedStore implements Store {
     final result = await _backend.collectGarbage(roots);
 
     // Clear cache of removed blocks
-    final reachable = <String>{};
     // This is a simplified approach - in practice you'd want to be more precise
     _cache.clear();
     _accessOrder.clear();
