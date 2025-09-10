@@ -319,7 +319,7 @@ class EventuallyChatService with ChangeNotifier {
     if (!_isStarted) return;
 
     try {
-      await _peerManager.discoverPeers();
+      await _peerManager.startDiscovery();
       debugPrint('🔍 Triggered peer discovery');
     } catch (e) {
       debugPrint('❌ Peer discovery failed: $e');

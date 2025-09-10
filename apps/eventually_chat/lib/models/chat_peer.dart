@@ -7,7 +7,6 @@ import 'package:eventually/eventually.dart';
 class ChatPeer {
   final String id;
   final String name;
-  final String? address;
   final DateTime connectedAt;
   final ChatPeerStatus status;
   final bool isOnline;
@@ -17,7 +16,6 @@ class ChatPeer {
   ChatPeer({
     required this.id,
     required this.name,
-    this.address,
     DateTime? connectedAt,
     this.status = ChatPeerStatus.connected,
     this.isOnline = true,
@@ -38,7 +36,6 @@ class ChatPeer {
     return ChatPeer(
       id: peer.id,
       name: name,
-      address: peer.address,
       status: status ?? ChatPeerStatus.connected,
       isOnline: isOnline ?? true,
       lastSeen: lastSeen,
@@ -50,7 +47,6 @@ class ChatPeer {
   ChatPeer copyWith({
     String? id,
     String? name,
-    String? address,
     DateTime? connectedAt,
     ChatPeerStatus? status,
     bool? isOnline,
@@ -60,7 +56,6 @@ class ChatPeer {
     return ChatPeer(
       id: id ?? this.id,
       name: name ?? this.name,
-      address: address ?? this.address,
       connectedAt: connectedAt ?? this.connectedAt,
       status: status ?? this.status,
       isOnline: isOnline ?? this.isOnline,
@@ -108,7 +103,6 @@ class ChatPeer {
     return {
       'id': id,
       'name': name,
-      'address': address,
       'connectedAt': connectedAt.millisecondsSinceEpoch,
       'status': status.name,
       'isOnline': isOnline,
@@ -122,7 +116,6 @@ class ChatPeer {
     return ChatPeer(
       id: json['id'] as String,
       name: json['name'] as String,
-      address: json['address'] as String?,
       connectedAt: DateTime.fromMillisecondsSinceEpoch(
         json['connectedAt'] as int,
       ),

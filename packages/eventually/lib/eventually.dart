@@ -11,6 +11,8 @@ export 'src/dag.dart';
 export 'src/store.dart' hide BlockNotFoundException;
 export 'src/sync.dart';
 export 'src/peer.dart';
+export 'src/transport_endpoint.dart';
+export 'src/peer_handshake.dart';
 export 'src/protocol.dart';
 export 'src/hash.dart';
 export 'src/codec.dart' hide Codec;

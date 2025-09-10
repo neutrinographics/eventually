@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:eventually/eventually.dart';
@@ -8,187 +6,159 @@ import 'package:nearby_connections/nearby_connections.dart';
 
 /// PeerManager implementation using Google's Nearby Connections API.
 ///
-/// This enables real peer-to-peer communication over WiFi and Bluetooth
-/// for offline-first chat functionality. The implementation handles:
-/// - Peer discovery via advertising and discovery
-/// - Connection establishment and management
-/// - Message routing and block exchange
-/// - Connection lifecycle management
+/// This implementation uses the separated transport/application architecture:
+/// - NearbyTransportManager handles Nearby Connections transport layer
+/// - This class manages peer discovery and handshake over those connections
 class NearbyConnectionsPeerManager implements PeerManager {
   static const String _serviceId = 'com.eventually.chat';
   static const Strategy _strategy = Strategy.P2P_CLUSTER;
 
   final String userId;
   final String userName;
-  final Map<String, NearbyPeer> _peers = {};
-  final Map<String, String> _endpointToPeerId = {};
+  final NearbyTransportManager _transportManager;
+  final PeerHandshake _handshake;
+
+  final Map<String, PeerConnection> _peerConnections = {};
   final StreamController<PeerEvent> _peerEventsController =
       StreamController<PeerEvent>.broadcast();
 
-  bool _isAdvertising = false;
-  bool _isDiscovering = false;
-  Timer? _discoveryTimer;
-  Timer? _advertisingTimer;
+  StreamSubscription? _transportEventsSubscription;
+  bool _isDiscoveryActive = false;
 
-  NearbyConnectionsPeerManager({required this.userId, required this.userName});
+  NearbyConnectionsPeerManager({
+    required this.userId,
+    required this.userName,
+    PeerHandshake? handshake,
+  }) : _transportManager = NearbyTransportManager(userId, userName),
+       _handshake = handshake ?? const DefaultPeerHandshake() {
+    _initializeTransportEventHandling();
+  }
 
   @override
-  Iterable<Peer> get connectedPeers =>
-      _peers.values.where((p) => p.isConnected).map((p) => p.peer);
+  Iterable<Peer> get connectedPeers => _peerConnections.values
+      .where((c) => c.isConnected && c.peer != null)
+      .map((c) => c.peer!);
 
   @override
   Stream<PeerEvent> get peerEvents => _peerEventsController.stream;
 
-  /// Start peer discovery and advertising.
-  Future<void> startDiscovery() async {
-    if (_isAdvertising || _isDiscovering) return;
+  @override
+  Future<PeerConnection> connectToEndpoint(String endpointAddress) async {
+    // Check if we already have a peer connection for this endpoint
+    final existingConnection = _peerConnections.values
+        .cast<TransportPeerConnection?>()
+        .firstWhere(
+          (c) => c?.transport.endpoint.address == endpointAddress,
+          orElse: () => null,
+        );
+
+    if (existingConnection?.isConnected == true &&
+        existingConnection?.peer != null) {
+      return existingConnection!;
+    }
+
+    // Find the transport endpoint
+    final endpoint = _transportManager.knownEndpoints.firstWhere(
+      (e) => e.address == endpointAddress,
+      orElse: () =>
+          throw PeerException('Transport endpoint not found: $endpointAddress'),
+    );
 
     try {
-      debugPrint('🔍 Starting nearby connections discovery and advertising');
+      debugPrint('🤝 Connecting to nearby endpoint: $endpointAddress');
 
-      // Start advertising this device
-      await _startAdvertising();
+      // Establish transport connection
+      final transport = await _transportManager.connect(endpoint);
 
-      // Start discovering other devices
-      await _startDiscovering();
+      // Perform peer handshake to discover identity
+      final handshakeResult = await _handshake.initiate(transport, userId);
 
-      // Periodically restart discovery to find new peers
-      _discoveryTimer = Timer.periodic(
-        const Duration(minutes: 2),
-        (_) => _restartDiscovery(),
+      // Store the peer connection
+      _peerConnections[handshakeResult.peer.id] = handshakeResult.connection;
+
+      // Emit peer connected event
+      _peerEventsController.add(
+        PeerConnected(peer: handshakeResult.peer, timestamp: DateTime.now()),
       );
 
-      // Periodically restart advertising to be discoverable
-      _advertisingTimer = Timer.periodic(
-        const Duration(minutes: 3),
-        (_) => _restartAdvertising(),
-      );
-
-      debugPrint('✅ Nearby connections started successfully');
+      debugPrint('✅ Connected to nearby peer: ${handshakeResult.peer.id}');
+      return handshakeResult.connection;
     } catch (e) {
-      debugPrint('❌ Failed to start nearby connections: $e');
-      rethrow;
-    }
-  }
-
-  /// Stop peer discovery and advertising.
-  Future<void> stopDiscovery() async {
-    if (!_isAdvertising && !_isDiscovering) return;
-
-    debugPrint('🛑 Stopping nearby connections');
-
-    _discoveryTimer?.cancel();
-    _advertisingTimer?.cancel();
-
-    try {
-      if (_isDiscovering) {
-        await Nearby().stopDiscovery();
-        _isDiscovering = false;
-      }
-
-      if (_isAdvertising) {
-        await Nearby().stopAdvertising();
-        _isAdvertising = false;
-      }
-
-      // Disconnect all peers
-      await disconnectAll();
-
-      debugPrint('✅ Nearby connections stopped successfully');
-    } catch (e) {
-      debugPrint('❌ Error stopping nearby connections: $e');
-    }
-  }
-
-  /// Discover peers manually.
-  Future<void> discoverPeers() async {
-    if (!_isDiscovering) {
-      await _startDiscovering();
+      debugPrint('❌ Failed to connect to nearby endpoint $endpointAddress: $e');
+      throw ConnectionException('Failed to connect to endpoint: $e', cause: e);
     }
   }
 
   @override
-  Future<PeerConnection> connect(Peer peer) async {
-    final nearbyPeer = _peers[peer.id];
-    if (nearbyPeer == null) {
-      throw PeerException('Peer not found: ${peer.id}');
-    }
-
-    if (nearbyPeer.isConnected) {
-      return nearbyPeer.connection!;
-    }
-
-    try {
-      debugPrint('🤝 Attempting to connect to peer: ${peer.id}');
-
-      // Request connection to the endpoint
-      await Nearby().requestConnection(
-        userName,
-        nearbyPeer.endpointId,
-        onConnectionInitiated: (String endpointId, ConnectionInfo info) {
-          debugPrint('🔗 Connection initiated with $endpointId');
-          // Auto-accept all connections for now
-          Nearby().acceptConnection(
-            endpointId,
-            onPayLoadRecieved: (String endpointId, Payload payload) {
-              _handlePayload(endpointId, payload);
-            },
-          );
-        },
-        onConnectionResult: (String endpointId, Status status) {
-          _handleConnectionResult(endpointId, status);
-        },
-        onDisconnected: (String endpointId) {
-          _handleDisconnection(endpointId);
-        },
-      );
-
-      // Wait for connection to be established
-      await _waitForConnection(nearbyPeer);
-
-      return nearbyPeer.connection!;
-    } catch (e) {
-      debugPrint('❌ Failed to connect to peer ${peer.id}: $e');
-      throw ConnectionException('Failed to connect to peer', peer: peer);
-    }
+  PeerConnection? getConnection(String peerId) {
+    return _peerConnections[peerId];
   }
 
   @override
   Future<void> disconnect(String peerId) async {
-    final nearbyPeer = _peers[peerId];
-    if (nearbyPeer == null) return;
+    final connection = _peerConnections[peerId];
+    if (connection != null) {
+      await connection.disconnect();
+      _peerConnections.remove(peerId);
 
-    try {
-      await Nearby().disconnectFromEndpoint(nearbyPeer.endpointId);
-      debugPrint('👋 Disconnected from peer: $peerId');
-    } catch (e) {
-      debugPrint('❌ Error disconnecting from peer $peerId: $e');
+      final peer = connection.peer;
+      if (peer != null) {
+        _peerEventsController.add(
+          PeerDisconnected(
+            peer: peer,
+            timestamp: DateTime.now(),
+            reason: 'Manual disconnect',
+          ),
+        );
+      }
+
+      debugPrint('👋 Disconnected from nearby peer: $peerId');
     }
   }
 
   @override
   Future<void> disconnectAll() async {
-    final peerIds = _peers.keys.toList();
+    final peerIds = List.of(_peerConnections.keys);
     for (final peerId in peerIds) {
       await disconnect(peerId);
     }
-    await Nearby().stopAllEndpoints();
+    await _transportManager.disconnectAll();
+  }
+
+  @override
+  Future<void> startDiscovery() async {
+    if (_isDiscoveryActive) return;
+
+    _isDiscoveryActive = true;
+    debugPrint('🔍 Starting nearby peer discovery');
+
+    // Start transport endpoint discovery
+    await _transportManager.startDiscovery();
+  }
+
+  @override
+  Future<void> stopDiscovery() async {
+    if (!_isDiscoveryActive) return;
+
+    _isDiscoveryActive = false;
+    await _transportManager.stopDiscovery();
+    debugPrint('🛑 Stopped nearby peer discovery');
   }
 
   @override
   Future<List<Peer>> findPeersWithBlock(CID cid) async {
     final peersWithBlock = <Peer>[];
 
-    for (final nearbyPeer in _peers.values) {
-      if (nearbyPeer.isConnected) {
+    for (final connection in _peerConnections.values) {
+      if (connection.isConnected && connection.peer != null) {
         try {
-          final hasBlock = await nearbyPeer.connection!.hasBlock(cid);
+          final hasBlock = await connection.hasBlock(cid);
           if (hasBlock) {
-            peersWithBlock.add(nearbyPeer.peer);
+            peersWithBlock.add(connection.peer!);
           }
         } catch (e) {
           debugPrint(
-            '❌ Error checking if peer ${nearbyPeer.peer.id} has block: $e',
+            '⚠️ Nearby peer ${connection.peer?.id} didn\'t respond to hasBlock query: $e',
           );
         }
       }
@@ -199,352 +169,412 @@ class NearbyConnectionsPeerManager implements PeerManager {
 
   @override
   Future<void> broadcast(Message message) async {
-    final payload = Uint8List.fromList(message.toBytes());
+    final connections = _peerConnections.values
+        .where((c) => c.isConnected)
+        .toList();
 
-    for (final nearbyPeer in _peers.values) {
-      if (nearbyPeer.isConnected) {
-        try {
-          await Nearby().sendBytesPayload(nearbyPeer.endpointId, payload);
-        } catch (e) {
-          debugPrint('❌ Failed to broadcast to ${nearbyPeer.peer.id}: $e');
-        }
+    for (final connection in connections) {
+      try {
+        await connection.sendMessage(message);
+      } catch (e) {
+        debugPrint(
+          '⚠️ Failed to broadcast to nearby peer ${connection.peer?.id}: $e',
+        );
       }
     }
-  }
-
-  @override
-  void addPeer(Peer peer) {
-    if (!_peers.containsKey(peer.id)) {
-      debugPrint('📝 Peer addition requested for: ${peer.id}');
-    }
-  }
-
-  @override
-  void removePeer(String peerId) {
-    final nearbyPeer = _peers.remove(peerId);
-    if (nearbyPeer != null) {
-      _endpointToPeerId.remove(nearbyPeer.endpointId);
-      debugPrint('🗑️ Removed peer: $peerId');
-    }
-  }
-
-  @override
-  Peer? getPeer(String peerId) {
-    return _peers[peerId]?.peer;
   }
 
   @override
   Future<PeerStats> getStats() async {
-    final connectedCount = _peers.values.where((p) => p.isConnected).length;
-    final totalMessages = _peers.values.fold(
-      0,
-      (sum, p) => sum + p.messagesSent + p.messagesReceived,
-    );
-    final totalBytesReceived = _peers.values.fold(
-      0,
-      (sum, p) => sum + p.bytesReceived,
-    );
-    final totalBytesSent = _peers.values.fold(0, (sum, p) => sum + p.bytesSent);
+    final connectedCount = _peerConnections.values
+        .where((c) => c.isConnected)
+        .length;
+    final transportStats = await _transportManager.getStats();
 
     return PeerStats(
-      totalPeers: _peers.length,
+      totalPeers: _peerConnections.length,
       connectedPeers: connectedCount,
-      totalMessages: totalMessages,
-      totalBytesReceived: totalBytesReceived,
-      totalBytesSent: totalBytesSent,
+      totalMessages: 0, // Would track in a real implementation
+      totalBytesReceived: transportStats.totalBytesReceived,
+      totalBytesSent: transportStats.totalBytesSent,
       details: {
-        'isAdvertising': _isAdvertising,
-        'isDiscovering': _isDiscovering,
-        'serviceId': _serviceId,
-        'strategy': _strategy.toString(),
-        'endpointMappings': _endpointToPeerId,
+        'transport_endpoints': transportStats.totalEndpoints,
+        'connected_endpoints': transportStats.connectedEndpoints,
+        'nearby_connections': true,
       },
     );
   }
 
-  // Private methods
+  void _initializeTransportEventHandling() {
+    _transportEventsSubscription = _transportManager.transportEvents.listen(
+      (event) async {
+        switch (event) {
+          case EndpointDiscovered():
+            debugPrint(
+              '🔍 Discovered nearby endpoint: ${event.endpoint.address}',
+            );
+            break;
+
+          case TransportConnected():
+            debugPrint(
+              '🔗 Nearby transport connected: ${event.endpoint.address}',
+            );
+            break;
+
+          case TransportDisconnected():
+            debugPrint(
+              '🔌 Nearby transport disconnected: ${event.endpoint.address}',
+            );
+            await _handleTransportDisconnected(event.endpoint);
+            break;
+
+          case TransportDataReceived():
+            // Data is handled by individual connections
+            break;
+        }
+      },
+      onError: (error) {
+        debugPrint('❌ Nearby transport event error: $error');
+      },
+    );
+  }
+
+  Future<void> _handleTransportDisconnected(TransportEndpoint endpoint) async {
+    final affectedConnections = _peerConnections.entries
+        .where((entry) {
+          final connection = entry.value;
+          if (connection is TransportPeerConnection) {
+            return connection.transport.endpoint.address == endpoint.address;
+          }
+          return false;
+        })
+        .map((entry) => entry.key)
+        .toList();
+
+    for (final peerId in affectedConnections) {
+      await disconnect(peerId);
+    }
+  }
+
+  void dispose() {
+    _transportEventsSubscription?.cancel();
+    _peerEventsController.close();
+    _transportManager.dispose();
+  }
+}
+
+/// Transport manager for Google's Nearby Connections API
+class NearbyTransportManager implements TransportManager {
+  final String userId;
+  final String userName;
+  final List<TransportEndpoint> _knownEndpoints = [];
+  final Map<String, NearbyTransportConnection> _connections = {};
+  final StreamController<TransportEvent> _transportEventsController =
+      StreamController<TransportEvent>.broadcast();
+
+  bool _isAdvertising = false;
+  bool _isDiscovering = false;
+
+  NearbyTransportManager(this.userId, this.userName);
+
+  List<TransportEndpoint> get knownEndpoints =>
+      List.unmodifiable(_knownEndpoints);
+
+  @override
+  Iterable<TransportEndpoint> get connectedEndpoints =>
+      _connections.values.where((c) => c.isConnected).map((c) => c.endpoint);
+
+  @override
+  Stream<TransportEvent> get transportEvents =>
+      _transportEventsController.stream;
+
+  @override
+  Future<TransportConnection> connect(TransportEndpoint endpoint) async {
+    final existingConnection = _connections[endpoint.address];
+    if (existingConnection != null && existingConnection.isConnected) {
+      return existingConnection;
+    }
+
+    final connection = NearbyTransportConnection(endpoint, userId);
+    await connection.connect();
+
+    _connections[endpoint.address] = connection;
+    _transportEventsController.add(
+      TransportConnected(endpoint: endpoint, timestamp: DateTime.now()),
+    );
+
+    debugPrint('🔗 Connected to nearby transport: ${endpoint.address}');
+    return connection;
+  }
+
+  @override
+  Future<void> disconnect(String endpointAddress) async {
+    final connection = _connections[endpointAddress];
+    if (connection != null) {
+      await connection.disconnect();
+      _connections.remove(endpointAddress);
+
+      _transportEventsController.add(
+        TransportDisconnected(
+          endpoint: connection.endpoint,
+          timestamp: DateTime.now(),
+          reason: 'Manual disconnect',
+        ),
+      );
+
+      debugPrint('🔌 Disconnected from nearby transport: $endpointAddress');
+    }
+  }
+
+  @override
+  Future<void> disconnectAll() async {
+    final connections = List.of(_connections.values);
+    for (final connection in connections) {
+      await disconnect(connection.endpoint.address);
+    }
+
+    await _stopAdvertising();
+    await _stopDiscovering();
+  }
+
+  @override
+  Future<void> startDiscovery() async {
+    if (_isAdvertising || _isDiscovering) return;
+
+    try {
+      debugPrint('🔍 Starting nearby connections discovery');
+      await _startAdvertising();
+      await _startDiscovering();
+    } catch (e) {
+      debugPrint('❌ Failed to start nearby discovery: $e');
+      throw TransportException('Failed to start discovery: $e');
+    }
+  }
+
+  @override
+  Future<void> stopDiscovery() async {
+    if (!_isAdvertising && !_isDiscovering) return;
+
+    debugPrint('🛑 Stopping nearby connections discovery');
+    await _stopAdvertising();
+    await _stopDiscovering();
+  }
+
+  @override
+  Future<TransportStats> getStats() async {
+    final totalConnections = _connections.length;
+    final activeConnections = _connections.values
+        .where((c) => c.isConnected)
+        .length;
+
+    int totalBytesReceived = 0;
+    int totalBytesSent = 0;
+
+    for (final connection in _connections.values) {
+      totalBytesReceived += connection.bytesReceived;
+      totalBytesSent += connection.bytesSent;
+    }
+
+    return TransportStats(
+      totalEndpoints: _knownEndpoints.length,
+      connectedEndpoints: activeConnections,
+      totalBytesReceived: totalBytesReceived,
+      totalBytesSent: totalBytesSent,
+      protocolStats: {
+        'nearby_connections': true,
+        'total_connections': totalConnections,
+        'advertising': _isAdvertising,
+        'discovering': _isDiscovering,
+      },
+    );
+  }
 
   Future<void> _startAdvertising() async {
     if (_isAdvertising) return;
 
-    try {
-      final success = await Nearby().startAdvertising(
-        userName,
-        _strategy,
-        onConnectionInitiated: (String endpointId, ConnectionInfo info) {
-          debugPrint(
-            '🔗 Incoming connection from $endpointId: ${info.endpointName}',
-          );
-          // Auto-accept incoming connections
-          Nearby().acceptConnection(
-            endpointId,
-            onPayLoadRecieved: (String endpointId, Payload payload) {
-              _handlePayload(endpointId, payload);
-            },
-          );
-        },
-        onConnectionResult: (String endpointId, Status status) {
-          _handleConnectionResult(endpointId, status);
-        },
-        onDisconnected: (String endpointId) {
-          _handleDisconnection(endpointId);
-        },
-        serviceId: _serviceId,
-      );
+    await Nearby().startAdvertising(
+      userName,
+      NearbyConnectionsPeerManager._strategy,
+      onConnectionInitiated: _onConnectionInitiated,
+      onConnectionResult: _onConnectionResult,
+      onDisconnected: _onDisconnected,
+      serviceId: NearbyConnectionsPeerManager._serviceId,
+    );
 
-      if (success) {
-        _isAdvertising = true;
-        debugPrint('📢 Started advertising as: $userName');
-      } else {
-        throw Exception('Failed to start advertising');
-      }
-    } catch (e) {
-      debugPrint('❌ Error starting advertising: $e');
-      rethrow;
-    }
+    _isAdvertising = true;
+    debugPrint('📢 Started advertising as: $userName');
+  }
+
+  Future<void> _stopAdvertising() async {
+    if (!_isAdvertising) return;
+
+    await Nearby().stopAdvertising();
+    _isAdvertising = false;
+    debugPrint('🔇 Stopped advertising');
   }
 
   Future<void> _startDiscovering() async {
     if (_isDiscovering) return;
 
-    try {
-      final success = await Nearby().startDiscovery(
-        userName,
-        _strategy,
-        onEndpointFound:
-            (String endpointId, String endpointName, String serviceId) {
-              _handleEndpointFound(endpointId, endpointName, serviceId);
-            },
-        onEndpointLost: (endpointId) {
-          if (endpointId != null) {
-            _handleEndpointLost(endpointId);
-          }
-        },
-        serviceId: _serviceId,
-      );
+    await Nearby().startDiscovery(
+      NearbyConnectionsPeerManager._serviceId,
+      NearbyConnectionsPeerManager._strategy,
+      onEndpointFound: _onEndpointFound,
+      onEndpointLost: (String? endpointId) {
+        if (endpointId != null) {
+          _onEndpointLost(endpointId);
+        }
+      },
+    );
 
-      if (success) {
-        _isDiscovering = true;
-        debugPrint('🔍 Started discovering peers');
-      } else {
-        throw Exception('Failed to start discovery');
-      }
-    } catch (e) {
-      debugPrint('❌ Error starting discovery: $e');
-      rethrow;
-    }
+    _isDiscovering = true;
+    debugPrint('🔍 Started discovering peers');
   }
 
-  Future<void> _restartDiscovery() async {
-    if (_isDiscovering) {
-      try {
-        await Nearby().stopDiscovery();
-        _isDiscovering = false;
-        await Future.delayed(const Duration(seconds: 1));
-        await _startDiscovering();
-      } catch (e) {
-        debugPrint('❌ Error restarting discovery: $e');
-      }
-    }
+  Future<void> _stopDiscovering() async {
+    if (!_isDiscovering) return;
+
+    await Nearby().stopDiscovery();
+    _isDiscovering = false;
+    debugPrint('🔍 Stopped discovering peers');
   }
 
-  Future<void> _restartAdvertising() async {
-    if (_isAdvertising) {
-      try {
-        await Nearby().stopAdvertising();
-        _isAdvertising = false;
-        await Future.delayed(const Duration(seconds: 1));
-        await _startAdvertising();
-      } catch (e) {
-        debugPrint('❌ Error restarting advertising: $e');
-      }
-    }
-  }
-
-  void _handleEndpointFound(
+  void _onEndpointFound(
     String endpointId,
     String endpointName,
     String serviceId,
   ) {
-    debugPrint('🔍 Found endpoint: $endpointName ($endpointId)');
+    debugPrint('🔍 Found nearby endpoint: $endpointName ($endpointId)');
 
-    // Create a unique peer ID
-    final peerId = '${endpointName}_${endpointId.hashCode}';
-
-    final peer = Peer(
-      id: peerId,
-      address: 'nearby://$endpointId',
+    final endpoint = TransportEndpoint(
+      address: endpointId,
+      protocol: 'nearby_connections',
       metadata: {
-        'name': endpointName,
-        'endpointId': endpointId,
-        'discoveredAt': DateTime.now().millisecondsSinceEpoch,
+        'endpoint_name': endpointName,
+        'service_id': serviceId,
+        'discovered_at': DateTime.now().toIso8601String(),
       },
     );
 
-    final nearbyPeer = NearbyPeer(peer: peer, endpointId: endpointId);
+    if (!_knownEndpoints.any((e) => e.address == endpointId)) {
+      _knownEndpoints.add(endpoint);
+      _transportEventsController.add(
+        EndpointDiscovered(endpoint: endpoint, timestamp: DateTime.now()),
+      );
+    }
+  }
 
-    _peers[peerId] = nearbyPeer;
-    _endpointToPeerId[endpointId] = peerId;
+  void _onEndpointLost(String endpointId) {
+    debugPrint('👻 Lost nearby endpoint: $endpointId');
+    _knownEndpoints.removeWhere((e) => e.address == endpointId);
+  }
 
-    _peerEventsController.add(
-      PeerDiscovered(peer: peer, timestamp: DateTime.now()),
+  void _onConnectionInitiated(String endpointId, ConnectionInfo info) {
+    debugPrint('🤝 Connection initiated with: $endpointId');
+    // Auto-accept all connections for now
+    Nearby().acceptConnection(
+      endpointId,
+      onPayLoadRecieved: (endpointId, payload) =>
+          _handlePayload(endpointId, payload),
     );
   }
 
-  void _handleEndpointLost(String endpointId) {
-    final peerId = _endpointToPeerId[endpointId];
-    if (peerId != null) {
-      final nearbyPeer = _peers[peerId];
-      if (nearbyPeer != null) {
-        debugPrint('📡 Lost endpoint: ${nearbyPeer.peer.id}');
-
-        _peerEventsController.add(
-          PeerDisconnected(
-            peer: nearbyPeer.peer,
-            timestamp: DateTime.now(),
-            reason: 'Endpoint lost',
-          ),
-        );
-
-        removePeer(peerId);
-      }
-    }
-  }
-
-  void _handleConnectionResult(String endpointId, Status status) {
-    final peerId = _endpointToPeerId[endpointId];
-    if (peerId == null) return;
-
-    final nearbyPeer = _peers[peerId];
-    if (nearbyPeer == null) return;
-
+  void _onConnectionResult(String endpointId, Status status) {
     if (status == Status.CONNECTED) {
-      debugPrint('✅ Connected to ${nearbyPeer.peer.id}');
-
-      nearbyPeer.connection = NearbyPeerConnection(
-        peer: nearbyPeer.peer,
-        endpointId: endpointId,
-      );
-
-      _peerEventsController.add(
-        PeerConnected(peer: nearbyPeer.peer, timestamp: DateTime.now()),
-      );
+      debugPrint('✅ Connected to nearby endpoint: $endpointId');
     } else {
-      debugPrint('❌ Connection failed with ${nearbyPeer.peer.id}: $status');
-
-      _peerEventsController.add(
-        PeerDisconnected(
-          peer: nearbyPeer.peer,
-          timestamp: DateTime.now(),
-          reason: 'Connection failed: $status',
-        ),
-      );
+      debugPrint('❌ Connection failed to endpoint: $endpointId');
     }
   }
 
-  void _handleDisconnection(String endpointId) {
-    final peerId = _endpointToPeerId[endpointId];
-    if (peerId == null) return;
-
-    final nearbyPeer = _peers[peerId];
-    if (nearbyPeer != null) {
-      debugPrint('🔌 Disconnected from ${nearbyPeer.peer.id}');
-
-      nearbyPeer.connection = null;
-
-      _peerEventsController.add(
-        PeerDisconnected(
-          peer: nearbyPeer.peer,
-          timestamp: DateTime.now(),
-          reason: 'Peer disconnected',
-        ),
-      );
-    }
+  void _onDisconnected(String endpointId) {
+    debugPrint('🔌 Disconnected from nearby endpoint: $endpointId');
+    disconnect(endpointId);
   }
 
   void _handlePayload(String endpointId, Payload payload) {
-    final peerId = _endpointToPeerId[endpointId];
-    if (peerId == null) return;
-
-    final nearbyPeer = _peers[peerId];
-    if (nearbyPeer?.connection == null) return;
-
-    try {
-      if (payload.type == PayloadType.BYTES) {
-        final bytes = payload.bytes!;
-        nearbyPeer!.messagesReceived++;
-        nearbyPeer.bytesReceived += bytes.length;
-
-        // For now, just create a simple ping message for the event
-        _peerEventsController.add(
-          MessageReceived(
-            peer: nearbyPeer.peer,
-            message: Ping(),
-            timestamp: DateTime.now(),
-          ),
-        );
-      }
-    } catch (e) {
-      debugPrint('❌ Error handling payload from $peerId: $e');
+    final connection = _connections[endpointId];
+    if (connection != null) {
+      connection._handleIncomingPayload(payload);
     }
   }
 
-  Future<void> _waitForConnection(NearbyPeer nearbyPeer) async {
-    const maxWaitTime = Duration(seconds: 10);
-    const checkInterval = Duration(milliseconds: 100);
-    var waitTime = Duration.zero;
-
-    while (waitTime < maxWaitTime && !nearbyPeer.isConnected) {
-      await Future.delayed(checkInterval);
-      waitTime += checkInterval;
-    }
-
-    if (!nearbyPeer.isConnected) {
-      throw ConnectionException('Connection timeout', peer: nearbyPeer.peer);
-    }
+  void dispose() {
+    _transportEventsController.close();
+    disconnectAll();
   }
 }
 
-/// Represents a peer discovered via Nearby Connections.
-class NearbyPeer {
-  final Peer peer;
-  final String endpointId;
-  NearbyPeerConnection? connection;
+/// Transport connection for Nearby Connections
+class NearbyTransportConnection implements TransportConnection {
+  final TransportEndpoint _endpoint;
+  final String _localId;
+  final StreamController<List<int>> _dataController =
+      StreamController<List<int>>.broadcast();
 
-  int messagesSent = 0;
-  int messagesReceived = 0;
-  int bytesSent = 0;
-  int bytesReceived = 0;
+  bool _isConnected = false;
+  int _bytesReceived = 0;
+  int _bytesSent = 0;
 
-  NearbyPeer({required this.peer, required this.endpointId, this.connection});
+  NearbyTransportConnection(this._endpoint, this._localId);
 
-  bool get isConnected => connection?.isConnected == true;
-}
-
-/// PeerConnection implementation for Nearby Connections.
-class NearbyPeerConnection implements PeerConnection {
   @override
-  final Peer peer;
-
-  final String endpointId;
-  final StreamController<Message> _messagesController =
-      StreamController<Message>.broadcast();
-
-  bool _isConnected = true;
-
-  NearbyPeerConnection({required this.peer, required this.endpointId});
+  TransportEndpoint get endpoint => _endpoint;
 
   @override
   bool get isConnected => _isConnected;
 
   @override
-  Stream<Message> get messages => _messagesController.stream;
+  Stream<List<int>> get dataStream => _dataController.stream;
+
+  int get bytesReceived => _bytesReceived;
+  int get bytesSent => _bytesSent;
 
   @override
   Future<void> connect() async {
-    // Connection is already established when this object is created
-    if (!_isConnected) {
-      throw ConnectionException('Connection already closed', peer: peer);
+    if (_isConnected) return;
+
+    try {
+      // Request connection to the endpoint
+      await Nearby().requestConnection(
+        _localId,
+        endpoint.address,
+        onConnectionInitiated: (endpointId, info) {
+          debugPrint('🔗 Connection initiated with $endpointId');
+        },
+        onConnectionResult: (endpointId, status) {
+          _isConnected = (status == Status.CONNECTED);
+          if (_isConnected) {
+            debugPrint('✅ Nearby transport connection established');
+          } else {
+            debugPrint('❌ Nearby transport connection failed');
+          }
+        },
+        onDisconnected: (endpointId) {
+          _isConnected = false;
+          debugPrint('🔌 Nearby transport connection lost');
+        },
+      );
+
+      // Wait for connection to be established
+      int attempts = 0;
+      while (!_isConnected && attempts < 30) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        attempts++;
+      }
+
+      if (!_isConnected) {
+        throw TransportConnectionException(
+          'Connection timeout',
+          endpoint: endpoint,
+        );
+      }
+    } catch (e) {
+      throw TransportConnectionException(
+        'Failed to connect: $e',
+        endpoint: endpoint,
+        cause: e,
+      );
     }
   }
 
@@ -552,117 +582,48 @@ class NearbyPeerConnection implements PeerConnection {
   Future<void> disconnect() async {
     if (!_isConnected) return;
 
+    await Nearby().disconnectFromEndpoint(endpoint.address);
     _isConnected = false;
-    await _messagesController.close();
-    await Nearby().disconnectFromEndpoint(endpointId);
+    await _dataController.close();
+
+    debugPrint('🔌 Nearby transport disconnected from ${endpoint.address}');
   }
 
   @override
-  Future<void> sendMessage(dynamic message) async {
+  Future<void> sendData(List<int> data) async {
     if (!_isConnected) {
-      throw ConnectionException('Not connected', peer: peer);
+      throw TransportConnectionException(
+        'Cannot send data: not connected',
+        endpoint: endpoint,
+      );
     }
 
-    Uint8List bytes;
-    if (message is Message) {
-      bytes = message.toBytes();
-    } else if (message is String) {
-      final data = {'type': 'generic', 'content': message};
-      bytes = Uint8List.fromList(utf8.encode(jsonEncode(data)));
-    } else {
-      bytes = Uint8List.fromList(message.toString().codeUnits);
-    }
+    _bytesSent += data.length;
 
-    await Nearby().sendBytesPayload(endpointId, bytes);
+    final bytes = Uint8List.fromList(data);
+    await Nearby().sendBytesPayload(endpoint.address, bytes);
   }
 
   @override
-  Future<Block?> requestBlock(CID cid) async {
-    if (!_isConnected) {
-      throw ConnectionException('Not connected', peer: peer);
-    }
-
-    // Send block request message
-    final request = {
-      'type': 'block_request',
-      'cid': cid.toString(),
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
-    };
-    await sendMessage(jsonEncode(request));
-
-    // In a real implementation, you'd wait for the response
-    await Future.delayed(const Duration(seconds: 1));
-    return null;
-  }
-
-  @override
-  Future<List<Block>> requestBlocks(List<CID> cids) async {
-    final blocks = <Block>[];
-    for (final cid in cids) {
-      final block = await requestBlock(cid);
-      if (block != null) {
-        blocks.add(block);
-      }
-    }
-    return blocks;
-  }
-
-  @override
-  Future<void> sendBlock(Block block) async {
-    final message = {
-      'type': 'block',
-      'cid': block.cid.toString(),
-      'data': base64Encode(block.data),
-      'size': block.size,
-    };
-    await sendMessage(jsonEncode(message));
-  }
-
-  @override
-  Future<bool> hasBlock(CID cid) async {
-    if (!_isConnected) {
-      throw ConnectionException('Not connected', peer: peer);
-    }
-
-    // Send has-block query
-    final query = {
-      'type': 'has_block',
-      'cid': cid.toString(),
-      'timestamp': DateTime.now().millisecondsSinceEpoch,
-    };
-    await sendMessage(jsonEncode(query));
-
-    // In a real implementation, you'd wait for the response
-    await Future.delayed(const Duration(milliseconds: 500));
-    return Random().nextBool();
-  }
-
-  @override
-  Future<Set<String>> getCapabilities() async {
+  Map<String, dynamic> getConnectionInfo() {
     return {
-      'chat_messages',
-      'user_presence',
-      'block_exchange',
-      'merkle_dag_sync',
-      'nearby_connections',
+      'endpoint': endpoint.address,
+      'protocol': endpoint.protocol,
+      'connected': _isConnected,
+      'bytes_sent': _bytesSent,
+      'bytes_received': _bytesReceived,
+      'local_id': _localId,
+      'endpoint_metadata': endpoint.metadata,
     };
   }
 
-  @override
-  Future<Duration> ping() async {
-    if (!_isConnected) {
-      throw ConnectionException('Not connected', peer: peer);
+  void _handleIncomingPayload(Payload payload) {
+    if (!_isConnected) return;
+
+    if (payload.type == PayloadType.BYTES && payload.bytes != null) {
+      final data = payload.bytes!;
+      _bytesReceived += data.length;
+      _dataController.add(data);
     }
-
-    final start = DateTime.now();
-
-    // Send ping message
-    final ping = {'type': 'ping', 'timestamp': start.millisecondsSinceEpoch};
-    await sendMessage(jsonEncode(ping));
-
-    // In a real implementation, you'd wait for the pong response
-    await Future.delayed(const Duration(milliseconds: 50));
-
-    return DateTime.now().difference(start);
   }
 }

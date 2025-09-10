@@ -105,7 +105,10 @@ class DefaultSynchronizer implements Synchronizer {
   @override
   Future<SyncResult> syncWithPeer(Peer peer, {Set<CID>? roots}) async {
     final startTime = DateTime.now();
-    final connection = await _peerManager.connect(peer);
+    final connection = _peerManager.getConnection(peer.id);
+    if (connection == null) {
+      throw SyncException('No connection found for peer: ${peer.id}');
+    }
 
     try {
       _syncEvents.add(SyncStarted(peer: peer, timestamp: startTime));
@@ -233,7 +236,9 @@ class DefaultSynchronizer implements Synchronizer {
     for (final cid in missing) {
       for (final peer in _peerManager.connectedPeers) {
         try {
-          final connection = await _peerManager.connect(peer);
+          final connection = _peerManager.getConnection(peer.id);
+          if (connection == null) continue;
+
           final block = await connection.requestBlock(cid);
 
           if (block != null && block.validate()) {

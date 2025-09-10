@@ -4,35 +4,27 @@ import 'package:meta/meta.dart';
 import 'cid.dart';
 import 'block.dart';
 
-/// Represents a peer in the distributed network.
+/// Represents a peer in the distributed network at the application layer.
 ///
-/// Peers can communicate with each other to synchronize content and
-/// exchange blocks in the Merkle DAG system.
+/// A peer is identified by a unique ID that is discovered during the initial
+/// communication handshake after a transport connection is established.
+/// This abstraction is separate from transport-layer concerns like addresses.
 @immutable
 class Peer {
-  /// Creates a peer with the given identifier and address.
-  const Peer({
-    required this.id,
-    required this.address,
-    this.metadata = const {},
-  });
+  /// Creates a peer with the given identifier.
+  const Peer({required this.id, this.metadata = const {}});
 
   /// Unique identifier for this peer.
+  /// This is discovered during initial peer communication, not known beforehand.
   final String id;
 
-  /// Network address of the peer (e.g., IP:port, multiaddr).
-  final String address;
-
-  /// Additional metadata about the peer.
+  /// Additional application-layer metadata about the peer.
+  /// May contain capabilities, preferences, version info, etc.
   final Map<String, dynamic> metadata;
 
   /// Creates a copy of this peer with updated properties.
-  Peer copyWith({String? id, String? address, Map<String, dynamic>? metadata}) {
-    return Peer(
-      id: id ?? this.id,
-      address: address ?? this.address,
-      metadata: metadata ?? this.metadata,
-    );
+  Peer copyWith({String? id, Map<String, dynamic>? metadata}) {
+    return Peer(id: id ?? this.id, metadata: metadata ?? this.metadata);
   }
 
   @override
@@ -41,23 +33,24 @@ class Peer {
       other is Peer &&
           runtimeType == other.runtimeType &&
           id == other.id &&
-          address == other.address &&
           metadata == other.metadata;
 
   @override
-  int get hashCode => Object.hash(id, address, metadata);
+  int get hashCode => Object.hash(id, metadata);
 
   @override
-  String toString() => 'Peer(id: $id, address: $address)';
+  String toString() => 'Peer(id: $id)';
 }
 
-/// Interface for peer-to-peer communication.
+/// Interface for application-layer peer-to-peer communication.
 ///
 /// This provides the foundation for exchanging messages, blocks, and
 /// synchronization information between peers in the network.
+/// The peer identity is established during connection handshake.
 abstract interface class PeerConnection {
   /// The peer this connection is established with.
-  Peer get peer;
+  /// This is null until the peer identity is discovered during handshake.
+  Peer? get peer;
 
   /// Whether this connection is currently active.
   bool get isConnected;
@@ -289,7 +282,10 @@ final class Pong extends Message {
   int get hashCode => type.hashCode;
 }
 
-/// Manages connections to multiple peers.
+/// Manages connections to multiple peers at the application layer.
+///
+/// This manages peer connections after transport is established and
+/// peer identity is discovered through handshake protocols.
 abstract interface class PeerManager {
   /// All currently connected peers.
   Iterable<Peer> get connectedPeers;
@@ -297,8 +293,12 @@ abstract interface class PeerManager {
   /// Stream of peer connection events.
   Stream<PeerEvent> get peerEvents;
 
-  /// Connects to a peer.
-  Future<PeerConnection> connect(Peer peer);
+  /// Connects to a transport endpoint and performs peer discovery.
+  /// Returns a connection once the peer identity is established.
+  Future<PeerConnection> connectToEndpoint(String endpointAddress);
+
+  /// Gets the connection for a known peer.
+  PeerConnection? getConnection(String peerId);
 
   /// Disconnects from a peer.
   Future<void> disconnect(String peerId);
@@ -306,20 +306,17 @@ abstract interface class PeerManager {
   /// Disconnects from all peers.
   Future<void> disconnectAll();
 
+  /// Starts discovering transport endpoints.
+  Future<void> startDiscovery();
+
+  /// Stops discovering transport endpoints.
+  Future<void> stopDiscovery();
+
   /// Finds peers that might have a specific block.
   Future<List<Peer>> findPeersWithBlock(CID cid);
 
   /// Broadcasts a message to all connected peers.
   Future<void> broadcast(Message message);
-
-  /// Adds a peer to the known peers list.
-  void addPeer(Peer peer);
-
-  /// Removes a peer from the known peers list.
-  void removePeer(String peerId);
-
-  /// Gets a peer by ID.
-  Peer? getPeer(String peerId);
 
   /// Gets statistics about peer connections.
   Future<PeerStats> getStats();
@@ -401,17 +398,17 @@ class PeerStats {
 
 /// Exception thrown when peer operations fail.
 class PeerException implements Exception {
-  const PeerException(this.message, {this.peer, this.cause});
+  const PeerException(this.message, {this.peerId, this.cause});
 
   final String message;
-  final Peer? peer;
+  final String? peerId;
   final Object? cause;
 
   @override
   String toString() {
     final buffer = StringBuffer('PeerException: $message');
-    if (peer != null) {
-      buffer.write(' (peer: ${peer!.id})');
+    if (peerId != null) {
+      buffer.write(' (peer: $peerId)');
     }
     if (cause != null) {
       buffer.write(' (caused by: $cause)');
@@ -422,11 +419,11 @@ class PeerException implements Exception {
 
 /// Exception thrown when connection to a peer fails.
 class ConnectionException extends PeerException {
-  const ConnectionException(String message, {super.peer, super.cause})
+  const ConnectionException(String message, {super.peerId, super.cause})
     : super(message);
 }
 
 /// Exception thrown when a peer times out.
 class PeerTimeoutException extends PeerException {
-  const PeerTimeoutException(String message, {super.peer}) : super(message);
+  const PeerTimeoutException(String message, {super.peerId}) : super(message);
 }

@@ -552,8 +552,13 @@ class BitSwapProtocol implements SyncProtocol {
     final request = SyncRequest(roots: roots, options: options ?? {});
     await connection.sendMessage(request);
 
+    final peer = connection.peer;
+    if (peer == null) {
+      throw ProtocolException('Peer identity not established for connection');
+    }
+
     return BitSwapSyncSession(
-      peer: connection.peer,
+      peer: peer,
       protocol: this,
       connection: connection,
     );
@@ -572,8 +577,13 @@ class BitSwapProtocol implements SyncProtocol {
 
     await connection.sendMessage(response);
 
+    final peer = connection.peer;
+    if (peer == null) {
+      throw ProtocolException('Peer identity not established for connection');
+    }
+
     return BitSwapSyncSession(
-      peer: connection.peer,
+      peer: peer,
       protocol: this,
       connection: connection,
     );
