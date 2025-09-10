@@ -213,6 +213,14 @@ class NearbyConnectionsPeerManager implements PeerManager {
             debugPrint(
               '🔍 Discovered nearby endpoint: ${event.endpoint.address}',
             );
+            // Automatically attempt to connect to discovered endpoints
+            try {
+              await _autoConnectToEndpoint(event.endpoint);
+            } catch (e) {
+              debugPrint(
+                '❌ Auto-connection failed to ${event.endpoint.address}: $e',
+              );
+            }
             break;
 
           case TransportConnected():
@@ -256,6 +264,35 @@ class NearbyConnectionsPeerManager implements PeerManager {
     }
   }
 
+  /// Automatically attempts to connect to a discovered endpoint
+  Future<void> _autoConnectToEndpoint(TransportEndpoint endpoint) async {
+    // Skip if we already have a connection attempt in progress
+    if (_transportManager.hasConnectionFor(endpoint.address)) {
+      debugPrint('⚠️ Connection already exists for: ${endpoint.address}');
+      return;
+    }
+
+    // Skip if we already have a peer connection for this endpoint
+    final existingPeerConnection = _peerConnections.values
+        .cast<TransportPeerConnection?>()
+        .any((c) => c?.transport.endpoint.address == endpoint.address);
+
+    if (existingPeerConnection) {
+      debugPrint('⚠️ Peer already connected for endpoint: ${endpoint.address}');
+      return;
+    }
+
+    debugPrint('🚀 Auto-connecting to endpoint: ${endpoint.address}');
+
+    try {
+      // Attempt to establish peer connection
+      await connectToEndpoint(endpoint.address);
+    } catch (e) {
+      debugPrint('❌ Auto-connection failed for ${endpoint.address}: $e');
+      // Don't rethrow - this is a background operation
+    }
+  }
+
   void dispose() {
     _transportEventsSubscription?.cancel();
     _peerEventsController.close();
@@ -283,6 +320,11 @@ class NearbyTransportManager implements TransportManager {
   @override
   Iterable<TransportEndpoint> get connectedEndpoints =>
       _connections.values.where((c) => c.isConnected).map((c) => c.endpoint);
+
+  /// Check if a connection exists for the given endpoint address
+  bool hasConnectionFor(String endpointAddress) {
+    return _connections.containsKey(endpointAddress);
+  }
 
   @override
   Stream<TransportEvent> get transportEvents =>
@@ -459,9 +501,13 @@ class NearbyTransportManager implements TransportManager {
 
     if (!_knownEndpoints.any((e) => e.address == endpointId)) {
       _knownEndpoints.add(endpoint);
+      debugPrint('📡 Added new endpoint to known list: $endpointId');
+
       _transportEventsController.add(
         EndpointDiscovered(endpoint: endpoint, timestamp: DateTime.now()),
       );
+    } else {
+      debugPrint('⚠️ Endpoint already known: $endpointId');
     }
   }
 
@@ -471,8 +517,14 @@ class NearbyTransportManager implements TransportManager {
   }
 
   void _onConnectionInitiated(String endpointId, ConnectionInfo info) {
-    debugPrint('🤝 Connection initiated with: $endpointId');
+    debugPrint(
+      '🤝 Connection initiated with: $endpointId (${info.endpointName})',
+    );
+    debugPrint('   Authentication token: ${info.authenticationToken}');
+    debugPrint('   Is incoming: ${info.isIncomingConnection}');
+
     // Auto-accept all connections for now
+    debugPrint('✅ Auto-accepting connection from: $endpointId');
     Nearby().acceptConnection(
       endpointId,
       onPayLoadRecieved: (endpointId, payload) =>
@@ -483,14 +535,65 @@ class NearbyTransportManager implements TransportManager {
   void _onConnectionResult(String endpointId, Status status) {
     if (status == Status.CONNECTED) {
       debugPrint('✅ Connected to nearby endpoint: $endpointId');
+
+      // Update connection state in our transport connections
+      final connection = _connections[endpointId];
+      if (connection != null) {
+        connection._setConnected(true);
+      }
+
+      // Emit transport connected event
+      final endpoint = _knownEndpoints.firstWhere(
+        (e) => e.address == endpointId,
+        orElse: () => TransportEndpoint(
+          address: endpointId,
+          protocol: 'nearby_connections',
+          metadata: {'connected_at': DateTime.now().toIso8601String()},
+        ),
+      );
+
+      _transportEventsController.add(
+        TransportConnected(endpoint: endpoint, timestamp: DateTime.now()),
+      );
     } else {
-      debugPrint('❌ Connection failed to endpoint: $endpointId');
+      debugPrint(
+        '❌ Connection failed to endpoint: $endpointId (Status: $status)',
+      );
+
+      // Remove failed connection attempt
+      _connections.remove(endpointId);
     }
   }
 
   void _onDisconnected(String endpointId) {
     debugPrint('🔌 Disconnected from nearby endpoint: $endpointId');
-    disconnect(endpointId);
+
+    // Update connection state
+    final connection = _connections[endpointId];
+    if (connection != null) {
+      connection._setConnected(false);
+    }
+
+    // Emit transport disconnected event
+    final endpoint = _knownEndpoints.firstWhere(
+      (e) => e.address == endpointId,
+      orElse: () => TransportEndpoint(
+        address: endpointId,
+        protocol: 'nearby_connections',
+        metadata: {'disconnected_at': DateTime.now().toIso8601String()},
+      ),
+    );
+
+    _transportEventsController.add(
+      TransportDisconnected(
+        endpoint: endpoint,
+        timestamp: DateTime.now(),
+        reason: 'Connection lost',
+      ),
+    );
+
+    // Clean up
+    _connections.remove(endpointId);
   }
 
   void _handlePayload(String endpointId, Payload payload) {
@@ -571,6 +674,7 @@ class NearbyTransportConnection implements TransportConnection {
         );
       }
     } catch (e) {
+      // TODO: if the peer is already connected, update it's status and continue.
       throw TransportConnectionException(
         'Failed to connect: $e',
         endpoint: endpoint,
@@ -588,6 +692,11 @@ class NearbyTransportConnection implements TransportConnection {
     await _dataController.close();
 
     debugPrint('🔌 Nearby transport disconnected from ${endpoint.address}');
+  }
+
+  /// Internal method to update connection state from transport manager
+  void _setConnected(bool connected) {
+    _isConnected = connected;
   }
 
   @override
