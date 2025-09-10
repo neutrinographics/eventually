@@ -10,7 +10,7 @@ import 'package:uuid/uuid.dart';
 import '../models/chat_message.dart';
 import '../models/chat_peer.dart';
 import 'hive_dag_store.dart';
-import 'mock_peer_manager.dart';
+import 'nearby_connections_peer_manager.dart';
 import 'permissions_service.dart';
 
 /// Chat service using the Eventually library for Merkle DAG synchronization.
@@ -33,7 +33,7 @@ class EventuallyChatService with ChangeNotifier {
 
   late final HiveDAGStore _store;
   late final DAG _dag;
-  late final MockPeerManager _peerManager;
+  late final NearbyConnectionsPeerManager _peerManager;
   late final Synchronizer _synchronizer;
 
   final List<ChatMessage> _messages = [];
@@ -107,8 +107,11 @@ class EventuallyChatService with ChangeNotifier {
       // Initialize DAG
       _dag = DAG();
 
-      // Initialize peer manager (mock for demo)
-      _peerManager = MockPeerManager(userId: _userId!);
+      // Initialize peer manager using nearby connections
+      _peerManager = NearbyConnectionsPeerManager(
+        userId: _userId!,
+        userName: _userName!,
+      );
 
       // Initialize synchronizer
       _synchronizer = DefaultSynchronizer(
@@ -433,6 +436,17 @@ class EventuallyChatService with ChangeNotifier {
 
   void _handlePeerEvent(PeerEvent event) {
     switch (event) {
+      case PeerDiscovered():
+        debugPrint('🔍 Peer discovered: ${event.peer.id}');
+        _addOrUpdatePeer(
+          ChatPeer.fromPeer(
+            event.peer,
+            name: event.peer.metadata['name'] as String? ?? 'Unknown',
+            status: ChatPeerStatus.discovered,
+            isOnline: false,
+          ),
+        );
+        break;
       case PeerConnected():
         debugPrint('👋 Peer connected: ${event.peer.id}');
         _addOrUpdatePeer(

@@ -25,6 +25,7 @@ dependencies:
   hive_flutter: ^1.1.0
   path_provider: ^2.1.1
   crypto: ^3.0.3
+  nearby_connections: ^4.1.1
 
 dev_dependencies:
   flutter_test:

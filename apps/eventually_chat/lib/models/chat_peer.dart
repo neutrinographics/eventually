@@ -158,13 +158,22 @@ class ChatPeer {
 }
 
 /// The connection status of a chat peer.
-enum ChatPeerStatus { connecting, connected, disconnected, failed, syncing }
+enum ChatPeerStatus {
+  discovered,
+  connecting,
+  connected,
+  disconnected,
+  failed,
+  syncing,
+}
 
 /// Extension methods for ChatPeerStatus.
 extension ChatPeerStatusExtension on ChatPeerStatus {
   /// Gets a user-friendly display name for the status.
   String get displayName {
     switch (this) {
+      case ChatPeerStatus.discovered:
+        return 'Discovered';
       case ChatPeerStatus.connecting:
         return 'Connecting';
       case ChatPeerStatus.connected:
@@ -180,6 +189,9 @@ extension ChatPeerStatusExtension on ChatPeerStatus {
 
   /// Whether this status indicates the peer is available for communication.
   bool get isAvailable {
-    return this == ChatPeerStatus.connected || this == ChatPeerStatus.syncing;
+    return this == ChatPeerStatus.discovered ||
+        this == ChatPeerStatus.connecting ||
+        this == ChatPeerStatus.connected ||
+        this == ChatPeerStatus.syncing;
   }
 }

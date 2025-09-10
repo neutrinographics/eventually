@@ -340,6 +340,12 @@ final class PeerConnected extends PeerEvent {
   const PeerConnected({required super.peer, required super.timestamp});
 }
 
+/// Event when a peer is discovered.
+@immutable
+final class PeerDiscovered extends PeerEvent {
+  const PeerDiscovered({required super.peer, required super.timestamp});
+}
+
 /// Event when a peer disconnects.
 @immutable
 final class PeerDisconnected extends PeerEvent {

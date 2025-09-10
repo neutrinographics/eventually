@@ -280,6 +280,8 @@ class PeerTile extends StatelessWidget {
     if (!peer.isOnline) return Colors.grey;
 
     switch (peer.status) {
+      case ChatPeerStatus.discovered:
+        return Colors.lightBlue;
       case ChatPeerStatus.connecting:
         return Colors.orange;
       case ChatPeerStatus.connected:
