@@ -64,17 +64,6 @@ class NearbyPeerManager extends TransportPeerManager {
   TransportManager get transport => _transport;
 
   @override
-  bool shouldAutoConnect(TransportPeer transportPeer) {
-    // Only connect to peers with matching service ID
-    final serviceId = transportPeer.metadata['service_id'] as String?;
-    if (serviceId != _transport.serviceId) {
-      return false;
-    }
-
-    return super.shouldAutoConnect(transportPeer);
-  }
-
-  @override
   Future<void> onTransportPeerDiscovered(TransportPeer transportPeer) async {
     debugPrint(
       '🔍 Discovered nearby peer: ${transportPeer.displayName} with service: ${transportPeer.metadata['service_id']}',
