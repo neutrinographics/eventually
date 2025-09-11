@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:meta/meta.dart';
 import 'package:eventually/eventually.dart';
 
@@ -119,18 +121,42 @@ abstract class Transport {
   ///
   /// Returns a list of discovered transport peers. May return an empty list if
   /// no peers are currently available.
-  Future<List<TransportPeer>> discoverPeers();
+  ///
+  /// Throws [TransportException] if discovery fails.
+  Future<List<TransportPeer>> discoverPeers({Duration? timeout});
 
-  /// Sends a message to a specific transport peer.
+  /// Sends bytes to a specific transport peer.
   ///
   /// This method is used to send messages to other nodes in the network.
   /// The exact mechanism depends on the transport implementation (could be
   /// direct socket connection, HTTP request, etc.).
   ///
   /// Throws [TransportException] if sending fails.
-  Future<void> sendMessage(
+  Future<void> sendBytes(
     TransportPeer peer,
-    Message message, {
+    Uint8List bytes, {
     Duration? timeout,
   });
+
+  /// Receives bytes from transport peers.
+  ///
+  /// This method is used to receive bytes from other nodes in the network.
+  /// The exact mechanism depends on the transport implementation (could be
+  /// direct socket connection, HTTP request, etc.).
+  Stream<IncomingBytes> get incomingBytes;
+
+  /// Checks if a transport peer is currently reachable.
+  ///
+  /// This can be used for peer health checking and maintenance.
+  /// The implementation should be lightweight and fast.
+  Future<bool> isPeerReachable(TransportPeer transportPeer);
+}
+
+@immutable
+class IncomingBytes {
+  final TransportPeer peer;
+  final Uint8List bytes;
+  final DateTime receivedAt;
+
+  IncomingBytes(this.peer, this.bytes, this.receivedAt);
 }
