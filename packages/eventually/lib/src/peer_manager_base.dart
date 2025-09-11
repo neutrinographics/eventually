@@ -6,6 +6,7 @@ import 'cid.dart';
 import 'peer.dart';
 import 'peer_config.dart';
 import 'peer_handshake.dart';
+import 'peer_id.dart';
 import 'transport_endpoint.dart';
 
 /// Base class that handles common transport-to-peer connection logic.
@@ -22,8 +23,8 @@ abstract class TransportPeerManager implements PeerManager {
   final PeerHandshake handshake;
 
   // Internal state
-  final Map<String, Peer> _peers = {};
-  final Map<String, PeerConnection> _connections = {};
+  final Map<PeerId, Peer> _peers = {};
+  final Map<PeerId, PeerConnection> _connections = {};
   final Map<String, TransportPeer> _discoveredTransportPeers = {};
   final Map<String, int> _connectionAttempts = {};
   final Map<String, DateTime> _lastConnectionAttempt = {};
@@ -124,12 +125,12 @@ abstract class TransportPeerManager implements PeerManager {
   }
 
   @override
-  PeerConnection? getConnection(String peerId) {
+  PeerConnection? getConnection(PeerId peerId) {
     return _connections[peerId];
   }
 
   @override
-  Future<void> disconnect(String peerId) async {
+  Future<void> disconnect(PeerId peerId) async {
     final peer = _peers[peerId];
     final connection = _connections[peerId];
 
@@ -285,7 +286,8 @@ abstract class TransportPeerManager implements PeerManager {
         );
 
         // Schedule reconnection if enabled
-        if (config.enableAutoReconnect && _shouldAttemptReconnection(peer.id)) {
+        if (config.enableAutoReconnect &&
+            _shouldAttemptReconnection(peer.transportPeer.address.value)) {
           _scheduleReconnection(peer);
         }
       }
@@ -559,7 +561,7 @@ abstract class TransportPeerManager implements PeerManager {
   }
 
   /// Checks if reconnection should be attempted.
-  bool _shouldAttemptReconnection(String peerId) {
+  bool _shouldAttemptReconnection(String address) {
     final attempts = _connectionAttempts.values.fold<int>(
       0,
       (sum, count) => sum + count,

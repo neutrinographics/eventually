@@ -14,14 +14,14 @@ class NearbyPeerManager extends TransportPeerManager {
 
   /// Creates a nearby connections peer manager with the specified configuration.
   NearbyPeerManager({
-    required String nodeId,
+    required PeerId nodeId,
     required String displayName,
     String serviceId = 'com.eventually.chat',
     Strategy strategy = Strategy.P2P_CLUSTER,
     PeerConfig? config,
     super.handshake,
   }) : _transport = NearbyTransportManager(
-         nodeId: nodeId,
+         nodeId: nodeId.value,
          displayName: displayName,
          serviceId: serviceId,
          strategy: strategy,
@@ -34,7 +34,7 @@ class NearbyPeerManager extends TransportPeerManager {
 
   /// Factory constructor optimized for nearby connections.
   factory NearbyPeerManager.nearby({
-    required String nodeId,
+    required PeerId nodeId,
     required String displayName,
     String serviceId = 'com.eventually.chat',
   }) {
@@ -48,7 +48,7 @@ class NearbyPeerManager extends TransportPeerManager {
 
   /// Factory constructor optimized for low latency scenarios.
   factory NearbyPeerManager.lowLatency({
-    required String nodeId,
+    required PeerId nodeId,
     required String displayName,
     String serviceId = 'com.eventually.chat',
   }) {

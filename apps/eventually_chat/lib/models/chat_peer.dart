@@ -5,7 +5,7 @@ import 'package:eventually/eventually.dart';
 /// Peers are other users who are participating in the chat network.
 /// Each peer has a unique ID, display name, and connection status.
 class ChatPeer {
-  final String id;
+  final PeerId id;
   final String name;
   final DateTime connectedAt;
   final ChatPeerStatus status;
@@ -45,7 +45,7 @@ class ChatPeer {
 
   /// Creates a copy of this peer with updated properties.
   ChatPeer copyWith({
-    String? id,
+    PeerId? id,
     String? name,
     DateTime? connectedAt,
     ChatPeerStatus? status,
@@ -101,7 +101,7 @@ class ChatPeer {
   /// Converts the peer to JSON for serialization.
   Map<String, dynamic> toJson() {
     return {
-      'id': id,
+      'id': id.value,
       'name': name,
       'connectedAt': connectedAt.millisecondsSinceEpoch,
       'status': status.name,
@@ -114,7 +114,7 @@ class ChatPeer {
   /// Creates a peer from JSON data.
   factory ChatPeer.fromJson(Map<String, dynamic> json) {
     return ChatPeer(
-      id: json['id'] as String,
+      id: PeerId(json['id'] as String),
       name: json['name'] as String,
       connectedAt: DateTime.fromMillisecondsSinceEpoch(
         json['connectedAt'] as int,

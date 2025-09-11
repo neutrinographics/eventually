@@ -28,7 +28,7 @@ class EventuallyChatService with ChangeNotifier {
   static const String _userNameKey = 'user_name_eventually';
   static const String _userIdKey = 'user_id_eventually';
 
-  String? _userId;
+  PeerId? _userId;
   String? _userName;
 
   late final HiveDAGStore _store;
@@ -37,8 +37,8 @@ class EventuallyChatService with ChangeNotifier {
   late final Synchronizer _synchronizer;
 
   final List<ChatMessage> _messages = [];
-  final Map<String, ChatPeer> _peers = {};
-  final Map<String, UserPresence> _userPresence = {};
+  final Map<PeerId, ChatPeer> _peers = {};
+  final Map<PeerId, UserPresence> _userPresence = {};
 
   StreamSubscription<SyncEvent>? _syncEventSubscription;
   StreamSubscription<PeerEvent>? _peerEventSubscription;
@@ -51,7 +51,7 @@ class EventuallyChatService with ChangeNotifier {
   EventuallyChatService();
 
   // Getters
-  String? get userId => _userId;
+  String? get userId => _userId?.value;
   String? get userName => _userName;
   bool get isInitialized => _isInitialized;
   bool get isStarted => _isStarted;
@@ -229,7 +229,7 @@ class EventuallyChatService with ChangeNotifier {
     try {
       // Create message
       final message = ChatMessage.create(
-        senderId: _userId!,
+        senderId: _userId!.value,
         senderName: _userName!,
         content: content.trim(),
         replyToId: replyToId,
@@ -352,12 +352,16 @@ class EventuallyChatService with ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
 
     _userName = prefs.getString(_userNameKey);
-    _userId = prefs.getString(_userIdKey);
+    final userIdString = prefs.getString(_userIdKey);
+    if (userIdString != null) {
+      _userId = PeerId(userIdString);
+    }
 
     // Generate new user ID if none exists
     if (_userId == null) {
-      _userId = const Uuid().v4();
-      await prefs.setString(_userIdKey, _userId!);
+      final userIdString = const Uuid().v4();
+      _userId = PeerId(userIdString);
+      await prefs.setString(_userIdKey, userIdString);
       debugPrint('🆔 Generated new user ID: $_userId');
     }
 
@@ -501,7 +505,7 @@ class EventuallyChatService with ChangeNotifier {
           break;
         case 'user_presence':
           final presence = UserPresence.fromBlock(block);
-          _userPresence[presence.userId] = presence;
+          _userPresence[PeerId(presence.userId)] = presence;
           _updatePeerPresence(presence);
           debugPrint(
             '👤 Updated presence for ${presence.userName}: ${presence.isOnline}',
@@ -514,22 +518,24 @@ class EventuallyChatService with ChangeNotifier {
   }
 
   void _updatePeerPresence(UserPresence presence) {
-    final existingPeer = _peers[presence.userId];
+    final presenceUserId = PeerId(presence.userId);
+    final existingPeer = _peers[presenceUserId];
     if (existingPeer != null) {
-      _peers[presence.userId] = existingPeer.copyWith(
+      _peers[presenceUserId] = existingPeer.copyWith(
         name: presence.userName,
         isOnline: presence.isOnline,
         lastSeen: presence.timestamp,
       );
-    } else if (presence.userId != _userId) {
+    } else if (presenceUserId != _userId) {
       // Create new peer from presence
-      _peers[presence.userId] = ChatPeer(
-        id: presence.userId,
+      _peers[presenceUserId] = ChatPeer(
+        id: presenceUserId,
         name: presence.userName,
         isOnline: presence.isOnline,
         lastSeen: presence.timestamp,
       );
     }
+    notifyListeners();
   }
 
   void _addOrUpdatePeer(ChatPeer peer) {
@@ -538,7 +544,7 @@ class EventuallyChatService with ChangeNotifier {
   }
 
   void _updatePeerStatus(
-    String peerId, {
+    PeerId peerId, {
     bool? isOnline,
     ChatPeerStatus? status,
   }) {
@@ -547,7 +553,7 @@ class EventuallyChatService with ChangeNotifier {
       _peers[peerId] = peer.copyWith(
         isOnline: isOnline ?? peer.isOnline,
         status: status ?? peer.status,
-        lastSeen: !isOnline! ? DateTime.now() : peer.lastSeen,
+        lastSeen: isOnline == false ? DateTime.now() : peer.lastSeen,
       );
       notifyListeners();
     }
@@ -556,7 +562,7 @@ class EventuallyChatService with ChangeNotifier {
   Future<void> _announcePresence(bool isOnline) async {
     try {
       final presence = UserPresence.create(
-        userId: _userId!,
+        userId: _userId!.value,
         userName: _userName!,
         isOnline: isOnline,
       );

@@ -5,6 +5,7 @@ import 'package:eventually/src/transport.dart';
 import 'package:meta/meta.dart';
 import 'transport_endpoint.dart';
 import 'peer.dart';
+import 'peer_id.dart';
 import 'block.dart';
 import 'cid.dart';
 
@@ -20,7 +21,7 @@ abstract interface class PeerHandshake {
   /// Returns the discovered peer and an established peer connection.
   Future<PeerHandshakeResult> initiate(
     TransportConnection transport,
-    String localPeerId,
+    PeerId localPeerId,
   );
 
   /// Handles an incoming handshake as the responder.
@@ -29,7 +30,7 @@ abstract interface class PeerHandshake {
   /// the peer connection after identity exchange.
   Future<PeerHandshakeResult> respond(
     TransportConnection transport,
-    String localPeerId,
+    PeerId localPeerId,
   );
 
   /// Gets the timeout duration for handshake operations.
@@ -60,7 +61,7 @@ class DefaultPeerHandshake implements PeerHandshake {
   @override
   Future<PeerHandshakeResult> initiate(
     TransportConnection transport,
-    String localPeerId,
+    PeerId localPeerId,
   ) async {
     final completer = Completer<PeerHandshakeResult>();
     late StreamSubscription subscription;
@@ -94,7 +95,7 @@ class DefaultPeerHandshake implements PeerHandshake {
 
             // Create peer and connection
             final peer = Peer(
-              id: message.peerId,
+              id: PeerId(message.peerId),
               transportPeer: transportPeer,
               metadata: message.metadata,
             );
@@ -124,7 +125,7 @@ class DefaultPeerHandshake implements PeerHandshake {
       // Send handshake request
       final request = HandshakeMessage(
         type: HandshakeMessageType.request,
-        peerId: localPeerId,
+        peerId: localPeerId.value,
         metadata: const {},
       );
       await transport.sendData(request.toBytes());
@@ -139,7 +140,7 @@ class DefaultPeerHandshake implements PeerHandshake {
   @override
   Future<PeerHandshakeResult> respond(
     TransportConnection transport,
-    String localPeerId,
+    PeerId localPeerId,
   ) async {
     final completer = Completer<PeerHandshakeResult>();
     late StreamSubscription subscription;
@@ -165,7 +166,7 @@ class DefaultPeerHandshake implements PeerHandshake {
             // Send handshake response
             final response = HandshakeMessage(
               type: HandshakeMessageType.response,
-              peerId: localPeerId,
+              peerId: localPeerId.value,
               metadata: const {},
             );
             await transport.sendData(response.toBytes());
@@ -181,7 +182,7 @@ class DefaultPeerHandshake implements PeerHandshake {
 
             // Create peer and connection
             final peer = Peer(
-              id: message.peerId,
+              id: PeerId(message.peerId),
               transportPeer: transportPeer,
               metadata: message.metadata,
             );

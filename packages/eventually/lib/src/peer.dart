@@ -5,6 +5,32 @@ import 'package:meta/meta.dart';
 import 'cid.dart';
 import 'block.dart';
 
+/// A typesafe identifier for peers in the distributed network.
+///
+/// This class wraps a string-based peer identifier and provides validation,
+/// type safety, and utility methods for working with peer identities.
+@immutable
+class PeerId {
+  /// The underlying string peer ID.
+  final String value;
+
+  /// Creates a peer ID.
+  const PeerId(this.value);
+
+  @override
+  String toString() => value;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! PeerId) return false;
+    return value == other.value;
+  }
+
+  @override
+  int get hashCode => value.hashCode;
+}
+
 /// Represents a peer in the distributed network at the application layer.
 ///
 /// A peer combines application-layer identity (discovered through handshake)
@@ -23,7 +49,7 @@ class Peer {
 
   /// Unique identifier for this peer at the application layer.
   /// This is discovered during initial peer communication handshake.
-  final String id;
+  final PeerId id;
 
   /// Transport-level information for reaching this peer.
   final TransportPeer transportPeer;
@@ -49,7 +75,7 @@ class Peer {
 
   /// Creates a copy of this peer with updated properties.
   Peer copyWith({
-    String? id,
+    PeerId? id,
     TransportPeer? transportPeer,
     Map<String, dynamic>? metadata,
     DateTime? lastContactTime,
@@ -351,10 +377,10 @@ abstract interface class PeerManager {
   Future<PeerConnection> connectToEndpoint(String endpointAddress);
 
   /// Gets the connection for a known peer.
-  PeerConnection? getConnection(String peerId);
+  PeerConnection? getConnection(PeerId peerId);
 
   /// Disconnects from a peer.
-  Future<void> disconnect(String peerId);
+  Future<void> disconnect(PeerId peerId);
 
   /// Disconnects from all peers.
   Future<void> disconnectAll();
@@ -454,7 +480,7 @@ class PeerException implements Exception {
   const PeerException(this.message, {this.peerId, this.cause});
 
   final String message;
-  final String? peerId;
+  final PeerId? peerId;
   final Object? cause;
 
   @override

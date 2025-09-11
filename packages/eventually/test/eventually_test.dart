@@ -239,12 +239,12 @@ void main() {
       );
 
       final peer = Peer(
-        id: 'peer-123',
+        id: PeerId('peer-123'),
         transportPeer: transportPeer,
         metadata: {'version': '1.0.0'},
       );
 
-      expect(peer.id, equals('peer-123'));
+      expect(peer.id, equals(PeerId('peer-123')));
       expect(peer.address.value, equals('127.0.0.1:8080'));
       expect(peer.metadata['version'], equals('1.0.0'));
     });
@@ -266,9 +266,9 @@ void main() {
         protocol: 'tcp',
       );
 
-      final peer1 = Peer(id: 'peer-123', transportPeer: transportPeer1);
-      final peer2 = Peer(id: 'peer-123', transportPeer: transportPeer2);
-      final peer3 = Peer(id: 'peer-456', transportPeer: transportPeer3);
+      final peer1 = Peer(id: PeerId('peer-123'), transportPeer: transportPeer1);
+      final peer2 = Peer(id: PeerId('peer-123'), transportPeer: transportPeer2);
+      final peer3 = Peer(id: PeerId('peer-456'), transportPeer: transportPeer3);
 
       expect(peer1, equals(peer2));
       expect(peer1.hashCode, equals(peer2.hashCode));

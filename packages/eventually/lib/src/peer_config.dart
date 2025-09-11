@@ -1,4 +1,5 @@
 import 'package:meta/meta.dart';
+import 'peer_id.dart';
 
 /// Configuration for peer manager behavior.
 ///
@@ -8,7 +9,7 @@ import 'package:meta/meta.dart';
 @immutable
 class PeerConfig {
   /// Unique identifier for this node in the peer network.
-  final String nodeId;
+  final PeerId nodeId;
 
   /// Display name for this node during peer discovery.
   final String? displayName;
@@ -100,8 +101,7 @@ class PeerConfig {
     this.maxReconnectAttempts = 3,
     this.enableMetadataExchange = true,
     this.transportConfig = const {},
-  }) : assert(nodeId.length > 0, 'Node ID cannot be empty'),
-       assert(
+  }) : assert(
          discoveryInterval > Duration.zero,
          'Discovery interval must be positive',
        ),
@@ -136,7 +136,7 @@ class PeerConfig {
   /// This configuration uses settings optimized for local peer-to-peer
   /// connections with fast discovery and connection establishment.
   factory PeerConfig.nearby({
-    required String nodeId,
+    required PeerId nodeId,
     String? displayName,
     Duration? discoveryInterval,
     bool? autoConnect,
@@ -144,7 +144,7 @@ class PeerConfig {
   }) {
     return PeerConfig(
       nodeId: nodeId,
-      displayName: displayName ?? nodeId,
+      displayName: displayName ?? nodeId.value,
       discoveryInterval: discoveryInterval ?? const Duration(seconds: 10),
       connectionTimeout: const Duration(seconds: 8),
       handshakeTimeout: const Duration(seconds: 3),
@@ -164,13 +164,13 @@ class PeerConfig {
   /// This configuration uses aggressive settings for fastest possible
   /// peer discovery and connection establishment.
   factory PeerConfig.lowLatency({
-    required String nodeId,
+    required PeerId nodeId,
     String? displayName,
     int? maxConnections,
   }) {
     return PeerConfig(
       nodeId: nodeId,
-      displayName: displayName ?? nodeId,
+      displayName: displayName ?? nodeId.value,
       discoveryInterval: const Duration(seconds: 5),
       connectionTimeout: const Duration(seconds: 5),
       handshakeTimeout: const Duration(seconds: 2),
@@ -191,7 +191,7 @@ class PeerConfig {
   /// This configuration uses conservative settings to minimize resource
   /// usage at the cost of slower discovery and connection establishment.
   factory PeerConfig.lowResource({
-    required String nodeId,
+    required PeerId nodeId,
     String? displayName,
     Duration? discoveryInterval,
     int? maxConnections,
@@ -216,13 +216,13 @@ class PeerConfig {
   /// This configuration prioritizes connection stability and fault tolerance
   /// over speed or resource efficiency.
   factory PeerConfig.reliable({
-    required String nodeId,
+    required PeerId nodeId,
     String? displayName,
     int? maxConnections,
   }) {
     return PeerConfig(
       nodeId: nodeId,
-      displayName: displayName ?? nodeId,
+      displayName: displayName ?? nodeId.value,
       discoveryInterval: const Duration(seconds: 20),
       connectionTimeout: const Duration(seconds: 15),
       handshakeTimeout: const Duration(seconds: 8),
@@ -240,7 +240,7 @@ class PeerConfig {
 
   /// Creates a copy of this configuration with optionally modified values.
   PeerConfig copyWith({
-    String? nodeId,
+    PeerId? nodeId,
     String? displayName,
     Duration? discoveryInterval,
     Duration? connectionTimeout,
@@ -279,7 +279,7 @@ class PeerConfig {
   }
 
   /// Gets the effective display name for this peer.
-  String get effectiveDisplayName => displayName ?? nodeId;
+  String get effectiveDisplayName => displayName ?? nodeId.value;
 
   @override
   String toString() {
