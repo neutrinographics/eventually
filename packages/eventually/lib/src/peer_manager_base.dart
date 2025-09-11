@@ -6,7 +6,6 @@ import 'cid.dart';
 import 'peer.dart';
 import 'peer_config.dart';
 import 'peer_handshake.dart';
-import 'peer_id.dart';
 import 'transport_endpoint.dart';
 
 /// Base class that handles common transport-to-peer connection logic.

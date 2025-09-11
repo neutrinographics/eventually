@@ -5,7 +5,6 @@ import 'package:eventually/src/transport.dart';
 import 'package:meta/meta.dart';
 import 'transport_endpoint.dart';
 import 'peer.dart';
-import 'peer_id.dart';
 import 'block.dart';
 import 'cid.dart';
 
@@ -88,14 +87,15 @@ class DefaultPeerHandshake implements PeerHandshake {
             final transportPeer = TransportPeer(
               address: TransportPeerAddress(transport.endpoint.address),
               displayName:
-                  message.metadata['displayName']?.toString() ?? message.peerId,
+                  message.metadata['displayName']?.toString() ??
+                  message.peerId.value,
               protocol: transport.endpoint.protocol,
               metadata: transport.endpoint.metadata,
             );
 
             // Create peer and connection
             final peer = Peer(
-              id: PeerId(message.peerId),
+              id: message.peerId,
               transportPeer: transportPeer,
               metadata: message.metadata,
             );
@@ -125,7 +125,7 @@ class DefaultPeerHandshake implements PeerHandshake {
       // Send handshake request
       final request = HandshakeMessage(
         type: HandshakeMessageType.request,
-        peerId: localPeerId.value,
+        peerId: localPeerId,
         metadata: const {},
       );
       await transport.sendData(request.toBytes());
@@ -166,7 +166,7 @@ class DefaultPeerHandshake implements PeerHandshake {
             // Send handshake response
             final response = HandshakeMessage(
               type: HandshakeMessageType.response,
-              peerId: localPeerId.value,
+              peerId: localPeerId,
               metadata: const {},
             );
             await transport.sendData(response.toBytes());
@@ -175,14 +175,15 @@ class DefaultPeerHandshake implements PeerHandshake {
             final transportPeer = TransportPeer(
               address: TransportPeerAddress(transport.endpoint.address),
               displayName:
-                  message.metadata['displayName']?.toString() ?? message.peerId,
+                  message.metadata['displayName']?.toString() ??
+                  message.peerId.value,
               protocol: transport.endpoint.protocol,
               metadata: transport.endpoint.metadata,
             );
 
             // Create peer and connection
             final peer = Peer(
-              id: PeerId(message.peerId),
+              id: message.peerId,
               transportPeer: transportPeer,
               metadata: message.metadata,
             );
@@ -236,7 +237,7 @@ class HandshakeMessage {
   });
 
   final HandshakeMessageType type;
-  final String peerId;
+  final PeerId peerId;
   final Map<String, dynamic> metadata;
 
   /// Converts the message to bytes for transmission.
@@ -255,7 +256,7 @@ class HandshakeMessage {
 
     return HandshakeMessage(
       type: type,
-      peerId: json['peer_id'] as String,
+      peerId: PeerId(json['peer_id'] as String),
       metadata: Map<String, dynamic>.from(json['metadata'] as Map),
     );
   }

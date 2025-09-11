@@ -1,5 +1,5 @@
+import 'package:eventually/src/peer.dart';
 import 'package:meta/meta.dart';
-import 'peer_id.dart';
 
 /// Configuration for peer manager behavior.
 ///
