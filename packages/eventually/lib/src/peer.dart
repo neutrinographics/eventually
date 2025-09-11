@@ -126,6 +126,7 @@ class Peer {
 /// This provides the foundation for exchanging messages, blocks, and
 /// synchronization information between peers in the network.
 /// The peer identity is established during connection handshake.
+@Deprecated('Use Peer and Transport instead')
 abstract interface class PeerConnection {
   /// The peer this connection is established with.
   /// This is null until the peer identity is discovered during handshake.
@@ -365,6 +366,7 @@ final class Pong extends Message {
 ///
 /// This manages peer connections after transport is established and
 /// peer identity is discovered through handshake protocols.
+/// TODO: could this be migrated to the Transport class?
 abstract interface class PeerManager {
   /// All currently connected peers.
   Iterable<Peer> get connectedPeers;
