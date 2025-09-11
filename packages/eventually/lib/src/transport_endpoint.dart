@@ -1,98 +1,11 @@
 import 'package:meta/meta.dart';
 
-/// Type-safe address for transport peers (transport-specific addresses).
-class TransportPeerAddress {
-  /// The underlying string address.
-  final String value;
-
-  /// Creates a transport peer address.
-  const TransportPeerAddress(this.value);
-
-  @override
-  String toString() => value;
-
-  @override
-  bool operator ==(Object other) {
-    if (identical(this, other)) return true;
-    if (other is! TransportPeerAddress) return false;
-    return value == other.value;
-  }
-
-  @override
-  int get hashCode => value.hashCode;
-}
-
-/// Transport-level peer representation.
-/// This represents a peer at the transport layer before we know their node ID.
-@immutable
-class TransportPeer {
-  final TransportPeerAddress address;
-
-  /// Display name discovered during peer discovery.
-  final String displayName;
-
-  /// Transport protocol identifier.
-  /// Examples: "nearby_connections", "tcp", "udp", "bluetooth", "websocket"
-  final String protocol;
-
-  /// When this transport peer was connected.
-  final DateTime connectedAt;
-
-  /// Whether this transport peer is currently active.
-  final bool isActive;
-
-  /// Optional metadata about this transport peer.
-  final Map<String, dynamic> metadata;
-
-  TransportPeer({
-    required this.address,
-    required this.displayName,
-    required this.protocol,
-    DateTime? connectedAt,
-    this.isActive = true,
-    this.metadata = const {},
-  }) : connectedAt = connectedAt ?? DateTime.now();
-
-  /// Creates a copy with modified values.
-  TransportPeer copyWith({
-    TransportPeerAddress? address,
-    String? displayName,
-    String? protocol,
-    DateTime? connectedAt,
-    bool? isActive,
-    Map<String, dynamic>? metadata,
-  }) {
-    return TransportPeer(
-      address: address ?? this.address,
-      displayName: displayName ?? this.displayName,
-      protocol: protocol ?? this.protocol,
-      connectedAt: connectedAt ?? this.connectedAt,
-      isActive: isActive ?? this.isActive,
-      metadata: metadata ?? this.metadata,
-    );
-  }
-
-  @override
-  String toString() {
-    return 'TransportPeer(address: $address, displayName: $displayName, protocol: $protocol, isActive: $isActive)';
-  }
-
-  @override
-  bool operator ==(Object other) {
-    if (identical(this, other)) return true;
-    if (other is! TransportPeer) return false;
-    return address == other.address && protocol == other.protocol;
-  }
-
-  @override
-  int get hashCode => Object.hash(address, protocol);
-}
-
 /// Represents a transport endpoint for establishing connections.
 ///
 /// This is the transport-layer abstraction that contains only the information
 /// needed to establish a physical connection (address, protocol info, etc.).
 /// The application-layer peer identity is discovered after connection.
+@Deprecated('Use `TransportPeer` instead')
 @immutable
 class TransportEndpoint {
   /// Creates a transport endpoint with the given address and protocol.
@@ -150,6 +63,7 @@ class TransportEndpoint {
 ///
 /// This handles the low-level transport communication before
 /// application-layer peer identity is established.
+@Deprecated('Use `Transport` instead')
 abstract interface class TransportConnection {
   /// The endpoint this connection is established with.
   TransportEndpoint get endpoint;
@@ -178,6 +92,7 @@ abstract interface class TransportConnection {
 /// This is responsible only for establishing and managing transport
 /// connections. Application-layer peer discovery happens after
 /// transport connection is established.
+@Deprecated('Use `Transport` instead')
 abstract interface class TransportManager {
   /// All currently connected transport endpoints.
   Iterable<TransportEndpoint> get connectedEndpoints;

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:eventually/src/transport.dart';
 import 'package:test/test.dart';
 import 'package:eventually/eventually.dart';
 

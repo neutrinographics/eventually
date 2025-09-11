@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'package:eventually/src/transport.dart';
 import 'package:meta/meta.dart';
 import 'cid.dart';
 import 'peer.dart';

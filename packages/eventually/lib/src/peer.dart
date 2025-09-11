@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'package:eventually/src/transport.dart';
 import 'package:meta/meta.dart';
 import 'cid.dart';
 import 'block.dart';
-import 'transport_endpoint.dart';
 
 /// Represents a peer in the distributed network at the application layer.
 ///
