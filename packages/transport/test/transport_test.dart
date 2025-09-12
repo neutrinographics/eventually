@@ -390,8 +390,6 @@ void main() {
       final config = TransportConfig(
         localPeerId: PeerId('test-peer'),
         protocol: mockProtocol,
-        handshakeProtocol: const JsonHandshakeProtocol(),
-        approvalHandler: const AutoApprovalHandler(),
         deviceDiscovery: const NoOpDeviceDiscovery(),
         connectionPolicy: const ManualConnectPolicy(),
         peerStore: peerStore,
@@ -567,8 +565,6 @@ void main() {
       final config = TransportConfig(
         localPeerId: PeerId('test-peer'),
         protocol: MockTransportProtocol(),
-        handshakeProtocol: const JsonHandshakeProtocol(),
-        approvalHandler: const AutoApprovalHandler(),
         deviceDiscovery: const NoOpDeviceDiscovery(),
         connectionPolicy: const ManualConnectPolicy(),
       );
@@ -583,8 +579,6 @@ void main() {
       final config = TransportConfig(
         localPeerId: PeerId('test-peer'),
         protocol: MockTransportProtocol(),
-        handshakeProtocol: const JsonHandshakeProtocol(),
-        approvalHandler: const AutoApprovalHandler(),
         connectionTimeout: const Duration(seconds: 60),
         handshakeTimeout: const Duration(seconds: 5),
         maxConnections: 50,

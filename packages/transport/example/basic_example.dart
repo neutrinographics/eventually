@@ -175,7 +175,6 @@ Future<void> main() async {
     handshakeProtocol: NoOpHandshakeProtocol(
       peer2Id,
     ), // Expect to connect to peer2
-    approvalHandler: const AutoApprovalHandler(),
     deviceDiscovery: BroadcastDeviceDiscovery(
       localDisplayName: 'Peer 1 Device',
       broadcastInterval: const Duration(seconds: 1),
@@ -191,7 +190,6 @@ Future<void> main() async {
     handshakeProtocol: NoOpHandshakeProtocol(
       peer1Id,
     ), // Expect connections from peer1
-    approvalHandler: const AutoApprovalHandler(),
     deviceDiscovery: BroadcastDeviceDiscovery(
       localDisplayName: 'Peer 2 Device',
       broadcastInterval: const Duration(seconds: 1),

@@ -19,8 +19,8 @@
 /// final config = TransportConfig(
 ///   localPeerId: PeerId('my-peer-id'),
 ///   protocol: MyTransportProtocol(), // Your transport implementation
-///   handshakeProtocol: JsonHandshakeProtocol(),
-///   approvalHandler: AutoApprovalHandler(),
+///   // handshakeProtocol: JsonHandshakeProtocol(), // Optional - this is the default
+///   // approvalHandler: AutoApprovalHandler(),     // Optional - this is the default
 /// );
 ///
 /// final transport = TransportManager(config);

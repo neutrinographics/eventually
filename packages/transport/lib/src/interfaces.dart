@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'models.dart';
+import 'default_implementations.dart';
 
 /// Abstract interface for low-level transport protocols (e.g., TCP, WebSocket, Bluetooth)
 abstract interface class TransportProtocol {
@@ -260,8 +261,8 @@ class TransportConfig {
   const TransportConfig({
     required this.localPeerId,
     required this.protocol,
-    required this.handshakeProtocol,
-    required this.approvalHandler,
+    this.handshakeProtocol = const JsonHandshakeProtocol(),
+    this.approvalHandler = const AutoApprovalHandler(),
     this.deviceDiscovery,
     this.connectionPolicy,
     this.peerStore,
@@ -276,10 +277,10 @@ class TransportConfig {
   /// The transport protocol to use
   final TransportProtocol protocol;
 
-  /// The handshake protocol to use
+  /// The handshake protocol to use (defaults to JsonHandshakeProtocol)
   final HandshakeProtocol handshakeProtocol;
 
-  /// Handler for connection approval
+  /// Handler for connection approval (defaults to AutoApprovalHandler)
   final ConnectionApprovalHandler approvalHandler;
 
   /// Optional device discovery mechanism

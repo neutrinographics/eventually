@@ -5,7 +5,7 @@ A generic transport library for handling peer-to-peer network connections with c
 ## Features
 
 - **Generic Transport Interface**: Pluggable transport protocols (TCP, WebSocket, Bluetooth, etc.)
-- **Device Discovery & Management**: Automatic device discovery with configurable mechanisms  
+- **Device Discovery & Management**: Automatic device discovery with configurable mechanisms
 - **Connection Management**: Automatic connection handling with approval/rejection workflows
 - **Address vs Peer ID Distinction**: Separate device addresses from peer identities
 - **Live Updates**: Real-time streams for device discovery, peer status changes and incoming messages
@@ -32,8 +32,8 @@ import 'package:transport/transport.dart';
 final config = TransportConfig(
   localPeerId: PeerId('my-peer-id'),
   protocol: MyTransportProtocol(), // Your transport implementation
-  handshakeProtocol: JsonHandshakeProtocol(),
-  approvalHandler: AutoApprovalHandler(),
+  // handshakeProtocol: JsonHandshakeProtocol(), // Optional - this is the default
+  // approvalHandler: AutoApprovalHandler(),     // Optional - this is the default
 );
 
 final transport = TransportManager(config);
@@ -100,7 +100,7 @@ Applications never see transport-level details like device addresses or discover
 ### Peer Lifecycle
 
 Peers go through the following states:
-1. `connecting` - Connection attempt in progress  
+1. `connecting` - Connection attempt in progress
 2. `connected` - Successfully connected and ready for messaging
 3. `disconnecting` - Connection being closed
 4. `disconnected` - No active connection
@@ -259,11 +259,11 @@ class CustomHandshakeProtocol implements HandshakeProtocol {
 final config = TransportConfig(
   localPeerId: PeerId('test-peer'),
   protocol: myProtocol,
-  handshakeProtocol: myHandshake,
-  approvalHandler: myApprovalHandler,
-  deviceDiscovery: myDeviceDiscovery,   // Optional - internal device discovery
-  connectionPolicy: myConnectionPolicy, // Optional - which devices to connect to
-  peerStore: myStore,                   // Optional - peer persistence
+  handshakeProtocol: myHandshake,       // Optional - defaults to JsonHandshakeProtocol
+  approvalHandler: myApprovalHandler,   // Optional - defaults to AutoApprovalHandler
+  deviceDiscovery: myDeviceDiscovery,      // Optional - internal device discovery
+  connectionPolicy: myConnectionPolicy,    // Optional - which devices to connect to
+  peerStore: myStore,                      // Optional - peer persistence
   connectionTimeout: Duration(seconds: 30),
   handshakeTimeout: Duration(seconds: 10),
   maxConnections: 100,
@@ -273,11 +273,18 @@ final config = TransportConfig(
 ## Default Implementations
 
 ### JsonHandshakeProtocol
-Simple JSON-based handshake for peer identification:
+Simple JSON-based handshake for peer identification (used by default):
 
 ```dart
 final handshake = JsonHandshakeProtocol(
   timeout: Duration(seconds: 10),
+);
+
+// Or just use the default in TransportConfig:
+final config = TransportConfig(
+  localPeerId: PeerId('my-peer'),
+  protocol: myProtocol,
+  // handshakeProtocol automatically defaults to JsonHandshakeProtocol()
 );
 ```
 
