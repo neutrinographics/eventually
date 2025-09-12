@@ -197,6 +197,44 @@ class PeerRemoved extends PeerStoreEvent {
   const PeerRemoved(super.peer);
 }
 
+/// Interface for deciding which discovered devices to connect to
+abstract interface class ConnectionPolicy {
+  /// Whether to automatically connect to this discovered device
+  Future<bool> shouldConnectToDevice(DiscoveredDevice device);
+}
+
+/// Auto-connect to all discovered devices
+class AutoConnectPolicy implements ConnectionPolicy {
+  const AutoConnectPolicy();
+
+  @override
+  Future<bool> shouldConnectToDevice(DiscoveredDevice device) async {
+    return true;
+  }
+}
+
+/// Never auto-connect to discovered devices
+class ManualConnectPolicy implements ConnectionPolicy {
+  const ManualConnectPolicy();
+
+  @override
+  Future<bool> shouldConnectToDevice(DiscoveredDevice device) async {
+    return false;
+  }
+}
+
+/// Use a callback to decide which devices to connect to
+class PolicyBasedConnectionPolicy implements ConnectionPolicy {
+  const PolicyBasedConnectionPolicy(this.shouldConnect);
+
+  final Future<bool> Function(DiscoveredDevice) shouldConnect;
+
+  @override
+  Future<bool> shouldConnectToDevice(DiscoveredDevice device) {
+    return shouldConnect(device);
+  }
+}
+
 /// A no-op device discovery implementation
 class NoOpDeviceDiscovery implements DeviceDiscovery {
   const NoOpDeviceDiscovery();
@@ -225,6 +263,7 @@ class TransportConfig {
     required this.handshakeProtocol,
     required this.approvalHandler,
     this.deviceDiscovery,
+    this.connectionPolicy,
     this.peerStore,
     this.connectionTimeout = const Duration(seconds: 30),
     this.handshakeTimeout = const Duration(seconds: 10),
@@ -245,6 +284,9 @@ class TransportConfig {
 
   /// Optional device discovery mechanism
   final DeviceDiscovery? deviceDiscovery;
+
+  /// Optional policy for deciding which discovered devices to connect to
+  final ConnectionPolicy? connectionPolicy;
 
   /// Optional peer store for persistence
   final PeerStore? peerStore;

@@ -4,6 +4,9 @@ import 'dart:typed_data';
 import 'interfaces.dart';
 import 'models.dart';
 
+// For fire-and-forget async calls
+void unawaited(Future<void> future) {}
+
 /// Main class that orchestrates peer connections, discovery, and messaging
 class TransportManager {
   TransportManager(this._config)
@@ -53,13 +56,6 @@ class TransportManager {
   /// Stream of connection attempt results
   Stream<ConnectionAttemptResult> get connectionResults =>
       _connectionResultController.stream;
-
-  /// Stream of newly discovered devices
-  Stream<DiscoveredDevice> get devicesDiscovered =>
-      _devicesDiscoveredController.stream;
-
-  /// Stream of devices that are no longer available
-  Stream<DiscoveredDevice> get devicesLost => _devicesLostController.stream;
 
   /// Get all currently known peers
   List<Peer> get peers => _peers.values.toList();
@@ -173,8 +169,10 @@ class TransportManager {
     await _devicesLostController.close();
   }
 
-  /// Attempt to connect to a device by address
-  Future<ConnectionAttemptResult> connectToDevice(DeviceAddress address) async {
+  /// Internal method to connect to a device by address
+  Future<ConnectionAttemptResult> _connectToDevice(
+    DeviceAddress address,
+  ) async {
     if (!_isStarted || _isDisposed) {
       return ConnectionAttemptResult(
         peerId: PeerId('unknown'), // Will be determined after handshake
@@ -514,13 +512,22 @@ class TransportManager {
   }
 
   /// Handle discovered devices
-  void _handleDeviceDiscovered(DiscoveredDevice device) {
-    _devicesDiscoveredController.add(device);
+  Future<void> _handleDeviceDiscovered(DiscoveredDevice device) async {
+    // Check if we should connect to this device
+    final policy = _config.connectionPolicy;
+    if (policy != null) {
+      final shouldConnect = await policy.shouldConnectToDevice(device);
+      if (shouldConnect) {
+        // Automatically attempt to connect to the device
+        unawaited(_connectToDevice(device.address));
+      }
+    }
   }
 
   /// Handle lost devices
   void _handleDeviceLost(DiscoveredDevice device) {
-    _devicesLostController.add(device);
+    // Device is no longer available - any existing connections will be
+    // handled by the connection closed events
   }
 
   /// Handle peer store events

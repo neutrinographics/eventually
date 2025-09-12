@@ -38,12 +38,8 @@ final config = TransportConfig(
 
 final transport = TransportManager(config);
 
-// Listen for discovered devices
-transport.devicesDiscovered.listen((device) {
-  print('Found device: ${device.displayName} at ${device.address.value}');
-  // Connect to interesting devices
-  transport.connectToDevice(device.address);
-});
+// Application only sees peers - device discovery is handled internally
+// Peers appear automatically when devices are discovered and connected
 
 // Listen for peer updates and messages
 transport.peerUpdates.listen((peer) {
@@ -58,10 +54,8 @@ transport.messagesReceived.listen((message) {
 // Start the transport (starts listening and device discovery)
 await transport.start();
 
-// Connect to a device (peer ID discovered via handshake)
-final result = await transport.connectToDevice(DeviceAddress('device-addr'));
-// Or connect to a known peer
-// final result = await transport.connectToPeer(PeerId('known-peer'));
+// Connect to a known peer (if you have the peer ID)
+final result = await transport.connectToPeer(PeerId('known-peer'));
 
 if (result.result == ConnectionResult.success) {
   // Send a message
@@ -85,19 +79,23 @@ The library maintains a clear distinction between:
 
 This allows the same peer to be reachable at different addresses over time.
 
-### Device Discovery vs Peer Management
+### Transport vs Application Layer Separation
 
-The library separates device discovery from peer management:
+The library maintains clean separation between transport and application concerns:
 
-**Device Discovery** (transport-level):
-- Finds devices on the network with their addresses and display names
-- No peer identity known yet (requires handshake)
-- Example: Nearby Connections finds endpoint IDs, Bluetooth finds MAC addresses
+**Transport Layer** (internal):
+- Device discovery (finding devices on network)
+- Connection establishment (connecting to discovered devices)
+- Address management (device addresses, endpoint IDs)
+- Handshake protocols (peer identification)
 
-**Peer Management** (application-level):
-- Manages known peers with verified identities
-- Created after successful connection and handshake
-- Tracks peer status, metadata, and connection state
+**Application Layer** (public API):
+- Peer management (identified peers only)
+- Message passing between peers
+- Peer status monitoring
+- Connection approval/rejection
+
+Applications never see transport-level details like device addresses or discovery events.
 
 ### Peer Lifecycle
 
@@ -259,12 +257,13 @@ class CustomHandshakeProtocol implements HandshakeProtocol {
 
 ```dart
 final config = TransportConfig(
-  localPeerId: PeerId('my-peer-id'),
+  localPeerId: PeerId('test-peer'),
   protocol: myProtocol,
   handshakeProtocol: myHandshake,
   approvalHandler: myApprovalHandler,
-  deviceDiscovery: myDeviceDiscovery,   // Optional
-  peerStore: myStore,                   // Optional
+  deviceDiscovery: myDeviceDiscovery,   // Optional - internal device discovery
+  connectionPolicy: myConnectionPolicy, // Optional - which devices to connect to
+  peerStore: myStore,                   // Optional - peer persistence
   connectionTimeout: Duration(seconds: 30),
   handshakeTimeout: Duration(seconds: 10),
   maxConnections: 100,
@@ -290,7 +289,7 @@ final store = InMemoryPeerStore();
 ```
 
 ### BroadcastDeviceDiscovery
-Broadcast-based device discovery:
+Broadcast-based device discovery (internal to transport layer):
 
 ```dart
 final discovery = BroadcastDeviceDiscovery(
@@ -298,6 +297,22 @@ final discovery = BroadcastDeviceDiscovery(
   broadcastInterval: Duration(seconds: 5),
   deviceTimeout: Duration(minutes: 2),
 );
+```
+
+### Connection Policies
+Control which discovered devices to automatically connect to:
+
+```dart
+// Auto-connect to all discovered devices
+final policy = AutoConnectPolicy();
+
+// Never auto-connect (manual peer connections only)
+final policy = ManualConnectPolicy();
+
+// Custom logic for connection decisions
+final policy = PolicyBasedConnectionPolicy((device) async {
+  return device.displayName.contains('MyApp');
+});
 ```
 
 ## Examples

@@ -176,7 +176,11 @@ Future<void> main() async {
       peer2Id,
     ), // Expect to connect to peer2
     approvalHandler: const AutoApprovalHandler(),
-    deviceDiscovery: const NoOpDeviceDiscovery(),
+    deviceDiscovery: BroadcastDeviceDiscovery(
+      localDisplayName: 'Peer 1 Device',
+      broadcastInterval: const Duration(seconds: 1),
+    ),
+    connectionPolicy: const AutoConnectPolicy(),
     peerStore: InMemoryPeerStore(),
   );
 
@@ -188,7 +192,11 @@ Future<void> main() async {
       peer1Id,
     ), // Expect connections from peer1
     approvalHandler: const AutoApprovalHandler(),
-    deviceDiscovery: const NoOpDeviceDiscovery(),
+    deviceDiscovery: BroadcastDeviceDiscovery(
+      localDisplayName: 'Peer 2 Device',
+      broadcastInterval: const Duration(seconds: 1),
+    ),
+    connectionPolicy: const AutoConnectPolicy(),
     peerStore: InMemoryPeerStore(),
   );
 
@@ -228,16 +236,25 @@ Future<void> main() async {
     await peer1Transport.start();
     await peer2Transport.start();
 
-    // Simulate device discovery and connection
+    // Simulate device discovery and automatic connection
     print('\n🔍 Simulating device discovery...');
-    print('📱 Found device: peer-2-device at ${peer2Address.value}');
 
-    // Try to connect from peer 1 to peer 2 by device address
-    print('\n🤝 Peer 1 attempting to connect to peer 2...');
-    final connectionResult = await peer1Transport.connectToDevice(peer2Address);
+    // Simulate peer 1 discovering peer 2's device
+    if (peer1Config.deviceDiscovery is BroadcastDeviceDiscovery) {
+      (peer1Config.deviceDiscovery! as BroadcastDeviceDiscovery)
+          .simulateReceivedBroadcast(
+            address: peer2Address,
+            displayName: 'Peer 2 Device',
+          );
+    }
 
-    if (connectionResult.result == ConnectionResult.success) {
-      print('✅ Connection successful!');
+    // Give time for automatic connection to establish
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    print('\n🤝 Checking if connection was established automatically...');
+    final peer2 = peer1Transport.getPeer(peer2Id);
+    if (peer2 != null && peer2.status == PeerStatus.connected) {
+      print('✅ Connection successful (automatically established)!');
 
       // Send a message from peer 1 to peer 2
       print('\n💬 Sending message from peer 1 to peer 2...');
@@ -287,7 +304,7 @@ Future<void> main() async {
       await Future.delayed(const Duration(milliseconds: 100));
       print('Disconnection complete');
     } else {
-      print('❌ Connection failed: ${connectionResult.error}');
+      print('❌ Connection was not established automatically');
     }
   } catch (e, stackTrace) {
     print('💥 Error occurred: $e');

@@ -393,6 +393,7 @@ void main() {
         handshakeProtocol: const JsonHandshakeProtocol(),
         approvalHandler: const AutoApprovalHandler(),
         deviceDiscovery: const NoOpDeviceDiscovery(),
+        connectionPolicy: const ManualConnectPolicy(),
         peerStore: peerStore,
       );
 
@@ -512,29 +513,52 @@ void main() {
       final result = await transport.sendMessage(message);
       expect(result, isFalse);
     });
+  });
 
-    test('can connect to device by address', () async {
-      await transport.start();
-
-      // This would fail since MockTransportProtocol.connect returns a connection
-      // but the handshake would need to be properly mocked
-      final result = await transport.connectToDevice(
-        DeviceAddress('test-addr'),
+  group('Connection Policy', () {
+    test('AutoConnectPolicy always returns true', () async {
+      const policy = AutoConnectPolicy();
+      final device = DiscoveredDevice(
+        address: DeviceAddress('test-addr'),
+        displayName: 'Test Device',
+        discoveredAt: DateTime.now(),
       );
 
-      // In a real implementation with proper mocks, this would succeed
-      expect(result.result, isNot(equals(ConnectionResult.success)));
+      final result = await policy.shouldConnectToDevice(device);
+      expect(result, isTrue);
     });
 
-    test('emits devices discovered events', () async {
-      final devices = <DiscoveredDevice>[];
-      transport.devicesDiscovered.listen(devices.add);
+    test('ManualConnectPolicy always returns false', () async {
+      const policy = ManualConnectPolicy();
+      final device = DiscoveredDevice(
+        address: DeviceAddress('test-addr'),
+        displayName: 'Test Device',
+        discoveredAt: DateTime.now(),
+      );
 
-      // Since we're using NoOpDeviceDiscovery, no events will be emitted
-      await transport.start();
-      await Future.delayed(const Duration(milliseconds: 10));
+      final result = await policy.shouldConnectToDevice(device);
+      expect(result, isFalse);
+    });
 
-      expect(devices, isEmpty);
+    test('PolicyBasedConnectionPolicy uses callback', () async {
+      final policy = PolicyBasedConnectionPolicy(
+        (device) async => device.displayName.contains('Connect'),
+      );
+
+      final deviceToConnect = DiscoveredDevice(
+        address: DeviceAddress('test-addr-1'),
+        displayName: 'ConnectMe Device',
+        discoveredAt: DateTime.now(),
+      );
+
+      final deviceToIgnore = DiscoveredDevice(
+        address: DeviceAddress('test-addr-2'),
+        displayName: 'Ignore Device',
+        discoveredAt: DateTime.now(),
+      );
+
+      expect(await policy.shouldConnectToDevice(deviceToConnect), isTrue);
+      expect(await policy.shouldConnectToDevice(deviceToIgnore), isFalse);
     });
   });
 
@@ -546,6 +570,7 @@ void main() {
         handshakeProtocol: const JsonHandshakeProtocol(),
         approvalHandler: const AutoApprovalHandler(),
         deviceDiscovery: const NoOpDeviceDiscovery(),
+        connectionPolicy: const ManualConnectPolicy(),
       );
 
       expect(config.localPeerId.value, equals('test-peer'));

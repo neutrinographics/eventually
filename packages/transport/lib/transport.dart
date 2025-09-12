@@ -25,32 +25,27 @@
 ///
 /// final transport = TransportManager(config);
 ///
-/// // Listen for peer updates and messages
+/// // Application only sees peers - device discovery is handled internally
+/// // Peers appear automatically when devices are discovered and connected
 /// transport.peerUpdates.listen((peer) {
-///   print('Peer update: ${peer.id} is now ${peer.status}');
+///   print('Peer ${peer.id.value} is now ${peer.status}');
 /// });
 ///
 /// transport.messagesReceived.listen((message) {
-///   print('Received message from ${message.senderId}');
+///   final text = String.fromCharCodes(message.data);
+///   print('Received: $text from ${message.senderId.value}');
 /// });
 ///
-/// // Start the transport
+/// // Start the transport (starts listening and device discovery)
 /// await transport.start();
 ///
-/// // Listen for discovered devices
-/// transport.devicesDiscovered.listen((device) {
-///   print('Found device: ${device.displayName}');
-///   // Connect to interesting devices
-///   transport.connectToDevice(device.address);
-/// });
-///
-/// // Or connect to a known peer
-/// final result = await transport.connectToPeer(PeerId('other-peer'));
+/// // Connect to a known peer (if you have the peer ID)
+/// final result = await transport.connectToPeer(PeerId('known-peer'));
 /// if (result.result == ConnectionResult.success) {
 ///   // Send a message
 ///   final message = TransportMessage(
 ///     senderId: config.localPeerId,
-///     recipientId: PeerId('other-peer'),
+///     recipientId: result.peerId,
 ///     data: Uint8List.fromList('Hello!'.codeUnits),
 ///     timestamp: DateTime.now(),
 ///   );
