@@ -229,52 +229,6 @@ void main() {
     });
   });
 
-  group('Peer', () {
-    test('creates peer with metadata', () {
-      final transportPeer = TransportDevice(
-        address: TransportDeviceAddress('127.0.0.1:8080'),
-        displayName: 'Test Peer',
-        protocol: 'tcp',
-      );
-
-      final peer = Peer(
-        id: PeerId('peer-123'),
-        transportPeer: transportPeer,
-        metadata: {'version': '1.0.0'},
-      );
-
-      expect(peer.id, equals(PeerId('peer-123')));
-      expect(peer.address.value, equals('127.0.0.1:8080'));
-      expect(peer.metadata['version'], equals('1.0.0'));
-    });
-
-    test('equality and hashing work correctly', () {
-      final transportPeer1 = TransportDevice(
-        address: TransportDeviceAddress('127.0.0.1:8080'),
-        displayName: 'Test Peer',
-        protocol: 'tcp',
-      );
-      final transportPeer2 = TransportDevice(
-        address: TransportDeviceAddress('127.0.0.1:8080'),
-        displayName: 'Test Peer',
-        protocol: 'tcp',
-      );
-      final transportPeer3 = TransportDevice(
-        address: TransportDeviceAddress('127.0.0.1:8080'),
-        displayName: 'Different Peer',
-        protocol: 'tcp',
-      );
-
-      final peer1 = Peer(id: PeerId('peer-123'), transportPeer: transportPeer1);
-      final peer2 = Peer(id: PeerId('peer-123'), transportPeer: transportPeer2);
-      final peer3 = Peer(id: PeerId('peer-456'), transportPeer: transportPeer3);
-
-      expect(peer1, equals(peer2));
-      expect(peer1.hashCode, equals(peer2.hashCode));
-      expect(peer1, isNot(equals(peer3)));
-    });
-  });
-
   group('Protocol Messages', () {
     test('creates block request', () {
       final data = Uint8List.fromList([1, 2, 3]);
@@ -316,12 +270,14 @@ void main() {
       expect(want.cids, equals(cids));
     });
 
-    test('creates ping and pong messages', () {
-      final ping = Ping();
-      expect(ping.type, equals('ping'));
+    test('message codec can decode messages', () {
+      // Test with a simpler Have message with no CIDs
+      final have = Have(cids: {});
+      final haveBytes = have.toBytes();
 
-      final pong = Pong();
-      expect(pong.type, equals('pong'));
+      final decoded = SyncMessageCodec.decode(haveBytes);
+      expect(decoded, isA<Have>());
+      expect((decoded as Have).cids, isEmpty);
     });
   });
 

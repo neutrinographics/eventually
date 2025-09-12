@@ -1,160 +1,13 @@
-import 'dart:async';
 import 'dart:typed_data';
-import 'package:eventually/src/transport.dart';
 import 'package:meta/meta.dart';
 import 'cid.dart';
 import 'block.dart';
 
-/// A typesafe identifier for peers in the distributed network.
-///
-/// This class wraps a string-based peer identifier and provides validation,
-/// type safety, and utility methods for working with peer identities.
+/// Base class for sync messages exchanged between peers.
 @immutable
-class PeerId {
-  /// The underlying string peer ID.
-  final String value;
-
-  /// Creates a peer ID.
-  const PeerId(this.value);
-
-  @override
-  String toString() => value;
-
-  @override
-  bool operator ==(Object other) {
-    if (identical(this, other)) return true;
-    if (other is! PeerId) return false;
-    return value == other.value;
-  }
-
-  @override
-  int get hashCode => value.hashCode;
-}
-
-/// Represents a peer in the distributed network at the application layer.
-///
-/// A peer combines application-layer identity (discovered through handshake)
-/// with transport-layer information (how to reach them). This bridges the
-/// transport and application layers after peer identity is established.
-@immutable
-class Peer {
-  /// Creates a peer with the given identifier and transport information.
-  Peer({
-    required this.id,
-    required this.transportPeer,
-    this.metadata = const {},
-    DateTime? lastContactTime,
-    this.isActive = true,
-  }) : lastContactTime = lastContactTime ?? DateTime.now();
-
-  /// Unique identifier for this peer at the application layer.
-  /// This is discovered during initial peer communication handshake.
-  final PeerId id;
-
-  /// Transport-level information for reaching this peer.
-  final TransportDevice transportPeer;
-
-  /// Additional application-layer metadata about the peer.
-  /// May contain capabilities, preferences, version info, etc.
-  final Map<String, dynamic> metadata;
-
-  /// When this peer was last successfully contacted.
-  final DateTime? lastContactTime;
-
-  /// Whether this peer is currently considered active.
-  final bool isActive;
-
-  /// Gets the transport address for this peer.
-  TransportDeviceAddress get address => transportPeer.address;
-
-  /// Gets the display name for this peer.
-  String get displayName => transportPeer.displayName;
-
-  /// Gets the transport protocol used by this peer.
-  String get protocol => transportPeer.protocol;
-
-  /// Creates a copy of this peer with updated properties.
-  Peer copyWith({
-    PeerId? id,
-    TransportDevice? transportPeer,
-    Map<String, dynamic>? metadata,
-    DateTime? lastContactTime,
-    bool? isActive,
-  }) {
-    return Peer(
-      id: id ?? this.id,
-      transportPeer: transportPeer ?? this.transportPeer,
-      metadata: metadata ?? this.metadata,
-      lastContactTime: lastContactTime ?? this.lastContactTime,
-      isActive: isActive ?? this.isActive,
-    );
-  }
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is Peer &&
-          runtimeType == other.runtimeType &&
-          id == other.id &&
-          transportPeer == other.transportPeer;
-
-  @override
-  int get hashCode => Object.hash(id, transportPeer);
-
-  @override
-  String toString() =>
-      'Peer(id: $id, address: ${transportPeer.address}, displayName: ${transportPeer.displayName}, protocol: ${transportPeer.protocol}, isActive: $isActive)';
-}
-
-/// Interface for application-layer peer-to-peer communication.
-///
-/// This provides the foundation for exchanging messages, blocks, and
-/// synchronization information between peers in the network.
-/// The peer identity is established during connection handshake.
-abstract interface class PeerConnection {
-  /// The peer this connection is established with.
-  /// This is null until the peer identity is discovered during handshake.
-  Peer? get peer;
-
-  /// Whether this connection is currently active.
-  bool get isConnected;
-
-  /// Stream of incoming messages from the peer.
-  Stream<Message> get messages;
-
-  /// Connects to the peer.
-  Future<void> connect();
-
-  /// Disconnects from the peer.
-  Future<void> disconnect();
-
-  /// Sends a message to the peer.
-  Future<void> sendMessage(dynamic message);
-
-  /// Requests a block from the peer.
-  Future<Block?> requestBlock(CID cid);
-
-  /// Requests multiple blocks from the peer.
-  Future<List<Block>> requestBlocks(List<CID> cids);
-
-  /// Sends a block to the peer.
-  Future<void> sendBlock(Block block);
-
-  /// Checks if the peer has a specific block.
-  Future<bool> hasBlock(CID cid);
-
-  /// Gets the peer's advertised capabilities.
-  Future<Set<String>> getCapabilities();
-
-  /// Performs a ping to check connectivity and measure latency.
-  Future<Duration> ping();
-}
-
-/// Base class for messages exchanged between peers.
-@immutable
-sealed class Message {
+sealed class SyncMessage {
   /// Creates a message with the given type and timestamp.
-  Message({required this.type, DateTime? timestamp})
+  SyncMessage({required this.type, DateTime? timestamp})
     : timestamp = timestamp ?? DateTime.now();
 
   /// The type of message.
@@ -165,16 +18,11 @@ sealed class Message {
 
   /// Converts the message to bytes for transmission.
   Uint8List toBytes();
-
-  /// Creates a message from bytes received over the network.
-  static Message fromBytes(Uint8List bytes) {
-    throw UnimplementedError('Message.fromBytes must be implemented');
-  }
 }
 
 /// Message requesting a block from a peer.
 @immutable
-final class BlockRequest extends Message {
+final class BlockRequest extends SyncMessage {
   /// Creates a block request message.
   BlockRequest({required this.cid, DateTime? timestamp})
     : super(type: 'block_request', timestamp: timestamp);
@@ -208,7 +56,7 @@ final class BlockRequest extends Message {
 
 /// Message containing a block in response to a request.
 @immutable
-final class BlockResponse extends Message {
+final class BlockResponse extends SyncMessage {
   /// Creates a block response message.
   BlockResponse({required this.block, DateTime? timestamp})
     : super(type: 'block_response', timestamp: timestamp);
@@ -244,7 +92,7 @@ final class BlockResponse extends Message {
 
 /// Message advertising blocks that a peer has available.
 @immutable
-final class Have extends Message {
+final class Have extends SyncMessage {
   /// Creates a have message.
   Have({required this.cids, DateTime? timestamp})
     : super(type: 'have', timestamp: timestamp);
@@ -276,7 +124,7 @@ final class Have extends Message {
 
 /// Message requesting information about what blocks a peer wants.
 @immutable
-final class Want extends Message {
+final class Want extends SyncMessage {
   /// Creates a want message.
   Want({required this.cids, DateTime? timestamp})
     : super(type: 'want', timestamp: timestamp);
@@ -306,202 +154,86 @@ final class Want extends Message {
   int get hashCode => Object.hashAll(cids);
 }
 
-/// Message for ping/pong to check connectivity.
-@immutable
-final class Ping extends Message {
-  /// Creates a ping message.
-  Ping({DateTime? timestamp}) : super(type: 'ping', timestamp: timestamp);
+/// Utility class for encoding/decoding sync messages.
+class SyncMessageCodec {
+  /// Decodes a sync message from bytes.
+  static SyncMessage? decode(Uint8List bytes) {
+    if (bytes.isEmpty) return null;
 
-  @override
-  Uint8List toBytes() {
-    return Uint8List.fromList(type.codeUnits);
-  }
+    try {
+      // Simple decoding based on message type
+      final string = String.fromCharCodes(bytes);
+      final parts = string.split('\x00');
 
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is Ping && runtimeType == other.runtimeType;
+      if (parts.isEmpty) return null;
 
-  @override
-  int get hashCode => type.hashCode;
-}
+      final type = parts[0];
 
-/// Message responding to a ping.
-@immutable
-final class Pong extends Message {
-  /// Creates a pong message.
-  Pong({DateTime? timestamp}) : super(type: 'pong', timestamp: timestamp);
-
-  @override
-  Uint8List toBytes() {
-    return Uint8List.fromList(type.codeUnits);
-  }
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is Pong && runtimeType == other.runtimeType;
-
-  @override
-  int get hashCode => type.hashCode;
-}
-
-/// Manages connections to multiple peers at the application layer.
-///
-/// This manages peer connections after transport is established and
-/// peer identity is discovered through handshake protocols.
-/// TODO: could this be migrated to the Transport class?
-abstract interface class PeerManager {
-  /// All currently connected peers.
-  Iterable<Peer> get connectedPeers;
-
-  /// All peers, connected or disconnected.
-  Iterable<Peer> get peers;
-
-  /// Stream of peer connection events.
-  Stream<PeerEvent> get peerEvents;
-
-  /// Stream of bytes that should be sent to the transport.
-  /// The synchronizer will forward these bytes to the transport.
-  Stream<OutgoingBytes> get outgoingBytes;
-
-  /// Handles incoming bytes from a transport device.
-  Future<void> handleIncomingBytes(IncomingBytes incomingBytes);
-
-  /// Performs the initial handshake protocol and creates the peer in a disconnected state.
-  /// The peer will need to be connected to before data can be synce to it.
-  Future<Peer> registerDeviceAsPeer(
-    TransportDevice device, {
-    Duration? timeout,
-  });
-
-  /// Connects to a peer so we can begin communicating with it.
-  Future<void> connectToPeer(PeerId peerId);
-
-  /// Gets the connection for a known peer.
-  @Deprecated('Cannot directly access peer connections')
-  PeerConnection? getConnection(PeerId peerId);
-
-  /// Disconnects from a peer.
-  Future<void> disconnect(PeerId peerId);
-
-  /// Disconnects from all peers.
-  Future<void> disconnectAll();
-
-  /// Finds peers that might have a specific block.
-  Future<List<Peer>> findPeersWithBlock(CID cid);
-
-  /// Broadcasts a message to all connected peers.
-  Future<void> broadcast(Message message);
-
-  /// Gets statistics about peer connections.
-  Future<PeerStats> getStats();
-
-  Future<void> dispose() async {}
-}
-
-/// Events related to peer connections.
-@immutable
-sealed class PeerEvent {
-  const PeerEvent({required this.peer, required this.timestamp});
-
-  final Peer peer;
-  final DateTime timestamp;
-}
-
-/// Event when a peer connects.
-@immutable
-final class PeerConnected extends PeerEvent {
-  const PeerConnected({required super.peer, required super.timestamp});
-}
-
-/// Event when a peer is discovered.
-@immutable
-final class PeerDiscovered extends PeerEvent {
-  const PeerDiscovered({required super.peer, required super.timestamp});
-}
-
-/// Event when a peer disconnects.
-@immutable
-final class PeerDisconnected extends PeerEvent {
-  const PeerDisconnected({
-    required super.peer,
-    required super.timestamp,
-    this.reason,
-  });
-
-  final String? reason;
-}
-
-/// Event when a message is received from a peer.
-@immutable
-final class MessageReceived extends PeerEvent {
-  const MessageReceived({
-    required super.peer,
-    required super.timestamp,
-    required this.message,
-  });
-
-  final Message message;
-}
-
-/// Statistics about peer connections.
-@immutable
-class PeerStats {
-  const PeerStats({
-    required this.totalPeers,
-    required this.connectedPeers,
-    required this.totalMessages,
-    required this.totalBytesReceived,
-    required this.totalBytesSent,
-    this.details = const {},
-  });
-
-  final int totalPeers;
-  final int connectedPeers;
-  final int totalMessages;
-  final int totalBytesReceived;
-  final int totalBytesSent;
-  final Map<String, dynamic> details;
-
-  @override
-  String toString() =>
-      'PeerStats('
-      'total: $totalPeers, '
-      'connected: $connectedPeers, '
-      'messages: $totalMessages, '
-      'bytes: ${totalBytesReceived + totalBytesSent}'
-      ')';
-}
-
-/// Exception thrown when peer operations fail.
-class PeerException implements Exception {
-  const PeerException(this.message, {this.peerId, this.cause});
-
-  final String message;
-  final PeerId? peerId;
-  final Object? cause;
-
-  @override
-  String toString() {
-    final buffer = StringBuffer('PeerException: $message');
-    if (peerId != null) {
-      buffer.write(' (peer: $peerId)');
+      switch (type) {
+        case 'have':
+          return _decodeHave(parts);
+        case 'want':
+          return _decodeWant(parts);
+        case 'block_request':
+          return _decodeBlockRequest(parts);
+        case 'block_response':
+          return _decodeBlockResponse(parts);
+        default:
+          return null;
+      }
+    } catch (e) {
+      return null;
     }
-    if (cause != null) {
-      buffer.write(' (caused by: $cause)');
-    }
-    return buffer.toString();
   }
-}
 
-/// Exception thrown when connection to a peer fails.
-class ConnectionException extends PeerException {
-  const ConnectionException(String message, {super.peerId, super.cause})
-    : super(message);
-}
+  static Have? _decodeHave(List<String> parts) {
+    if (parts.length < 2) return null;
 
-/// Exception thrown when a peer times out.
-class PeerTimeoutException extends PeerException {
-  const PeerTimeoutException(String message, {super.peerId}) : super(message);
+    final cids = <CID>{};
+    for (int i = 1; i < parts.length; i++) {
+      if (parts[i].isNotEmpty) {
+        try {
+          cids.add(CID.parse(parts[i]));
+        } catch (e) {
+          // Skip invalid CIDs
+        }
+      }
+    }
+
+    return Have(cids: cids);
+  }
+
+  static Want? _decodeWant(List<String> parts) {
+    if (parts.length < 2) return null;
+
+    final cids = <CID>{};
+    for (int i = 1; i < parts.length; i++) {
+      if (parts[i].isNotEmpty) {
+        try {
+          cids.add(CID.parse(parts[i]));
+        } catch (e) {
+          // Skip invalid CIDs
+        }
+      }
+    }
+
+    return Want(cids: cids);
+  }
+
+  static BlockRequest? _decodeBlockRequest(List<String> parts) {
+    if (parts.length < 2) return null;
+
+    try {
+      final cid = CID.parse(parts[1]);
+      return BlockRequest(cid: cid);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  static BlockResponse? _decodeBlockResponse(List<String> parts) {
+    // This would need more sophisticated parsing for the block data
+    // For now, return null
+    return null;
+  }
 }

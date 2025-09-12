@@ -1,340 +1,93 @@
 import 'dart:async';
 import 'package:meta/meta.dart';
+import 'package:transport/transport.dart';
 import 'block.dart';
 import 'cid.dart';
 import 'dag.dart';
 import 'store.dart';
 import 'peer.dart';
-import 'transport.dart';
-import 'peer_config.dart';
-import 'generic_peer_manager.dart';
 
-/// Interface for synchronizing Merkle DAGs between peers.
-///
-/// The synchronizer manages the process of discovering missing blocks,
-/// requesting them from peers, and keeping the local DAG up to date
-/// with changes from the network.
-/// TODO: remove this interface, and just have a single implementation.
-abstract interface class Synchronizer {
-  /// The local store containing blocks.
-  Store get store;
+/// Configuration for the Eventually synchronizer.
+@immutable
+class SyncConfig {
+  const SyncConfig({
+    this.announceNewBlocks = true,
+    this.autoRequestMissing = true,
+    this.maxConcurrentRequests = 10,
+  });
 
-  /// The local DAG representation.
-  DAG get dag;
+  /// Whether to automatically announce new blocks to peers.
+  final bool announceNewBlocks;
 
-  /// The peer manager for network communication.
-  PeerManager get peerManager;
+  /// Whether to automatically request missing blocks when discovered.
+  final bool autoRequestMissing;
 
-  /// Stream of synchronization events.
-  Stream<SyncEvent> get syncEvents;
-
-  /// Announces new blocks to peers.
-  ///
-  /// Notifies connected peers about newly added blocks so they can
-  /// request them if needed.
-  Future<void> announceBlocks(Set<CID> cids);
-
-  /// Requests missing blocks for a specific DAG root.
-  ///
-  /// Walks the DAG from the given root and identifies any missing blocks,
-  /// then requests them from available peers.
-  Future<Set<Block>> fetchMissingBlocks(CID root);
-
-  /// Gets synchronization statistics.
-  Future<SyncStats> getStats();
-
-  /// Gets peer statistics.
-  Future<PeerStats> getPeerStats();
-
-  /// Connects to a peer by ID.
-  Future<void> connectToPeer(PeerId peerId);
-
-  /// Stream of peer connection events.
-  Stream<PeerEvent> get peerEvents;
-
-  /// All currently connected peers.
-  Iterable<Peer> get connectedPeers;
-
-  /// Initializes the synchronizer and starts orchestration.
-  Future<void> start();
-
-  /// Closes the synchronizer and releases resources.
-  Future<void> stop();
+  /// Maximum number of concurrent block requests.
+  final int maxConcurrentRequests;
 }
 
-/// Default implementation of the Synchronizer interface.
+/// Synchronizer for Merkle DAG content using the transport library.
 ///
-/// This synchronizer fully manages both the transport layer and peer manager
-/// internally. The application only needs to provide the transport and config,
-/// and the synchronizer handles all peer discovery, connection management,
-/// and synchronization operations.
-class DefaultSynchronizer implements Synchronizer {
+/// This synchronizer focuses purely on content synchronization logic,
+/// using the transport library for all peer management and networking.
+class EventuallySynchronizer {
   /// Creates a new synchronizer.
-  ///
-  /// The synchronizer will create and fully manage the peer manager internally.
-  /// The application should not interact with the peer manager directly.
-  ///
-  /// Example:
-  /// ```dart
-  /// final synchronizer = DefaultSynchronizer(
-  ///   store: _store,
-  ///   dag: _dag,
-  ///   transport: transport,
-  ///   config: config,
-  /// );
-  /// await synchronizer.initialize();
-  /// ```
-  DefaultSynchronizer({
+  EventuallySynchronizer({
     required Store store,
     required DAG dag,
-    required Transport transport,
-    required PeerConfig config,
-    PeerManager? peerManager,
+    SyncConfig? config,
   }) : _store = store,
        _dag = dag,
-       _transport = transport,
-       _config = config,
-       _peerManager = peerManager ?? GenericPeerManager(config: config),
+       _config = config ?? const SyncConfig(),
        _syncEvents = StreamController<SyncEvent>.broadcast(),
-       _continuousSyncTimer = null,
-       _discoveryTimer = null,
-       _stats = SyncStats.empty(),
-       _isStarted = false;
+       _stats = SyncStats.empty();
 
   final Store _store;
   final DAG _dag;
-  final Transport _transport;
-  final PeerConfig _config;
-  final PeerManager _peerManager;
+  final SyncConfig _config;
   final StreamController<SyncEvent> _syncEvents;
-  Timer? _continuousSyncTimer;
-  Timer? _discoveryTimer;
   SyncStats _stats;
-  bool _isStarted;
-  StreamSubscription<IncomingBytes>? _incomingBytesSubscription;
 
-  @override
-  Store get store => _store;
+  TransportManager? _transport;
+  StreamSubscription<TransportMessage>? _messageSubscription;
 
-  @override
-  DAG get dag => _dag;
-
-  @override
-  PeerManager get peerManager => _peerManager;
-
-  @override
+  /// Stream of synchronization events.
   Stream<SyncEvent> get syncEvents => _syncEvents.stream;
 
-  @override
-  Future<PeerStats> getPeerStats() async {
-    return await _peerManager.getStats();
-  }
+  /// Current synchronization statistics.
+  SyncStats get stats => _stats;
 
-  @override
-  Stream<PeerEvent> get peerEvents => _peerManager.peerEvents;
+  /// Initializes the synchronizer with a transport manager.
+  Future<void> initialize(TransportManager transport) async {
+    _transport = transport;
 
-  @override
-  Iterable<Peer> get connectedPeers => _peerManager.connectedPeers;
-
-  @override
-  Future<void> start() async {
-    if (_isStarted) return;
-
-    await _transport.initialize();
-    _setupIncomingMessageHandlers();
-    _startSyncTimer();
-    _startPeerDiscoveryTimer();
-
-    _isStarted = true;
-  }
-
-  void _setupIncomingMessageHandlers() {
-    _incomingBytesSubscription = _transport.incomingBytes.listen(
-      _peerManager.handleIncomingBytes,
-      onError: _handleTransportError,
-    );
-
-    _peerManager.outgoingBytes.listen(
-      _transport.sendBytes,
+    // Listen for incoming messages and handle sync protocol messages
+    _messageSubscription = transport.messagesReceived.listen(
+      _handleIncomingMessage,
       onError: _handleTransportError,
     );
   }
 
-  void _startPeerDiscoveryTimer() {
-    if (_config.discoveryInterval <= Duration.zero) return;
-
-    _discoveryTimer = Timer.periodic(_config.discoveryInterval, (_) async {
-      await _discoverPeers();
-    });
-  }
-
-  /// Orchestrates peer discovery: transport finds peers, peer manager handles them
-  Future<void> _discoverPeers() async {
-    if (!_isStarted) return;
-
-    try {
-      final discoveredDevices = await _transport.discoverDevices();
-
-      for (final device in discoveredDevices) {
-        // TODO: catch connection failures so we don't prevent other devices from connecting.
-        final peer = await _peerManager.registerDeviceAsPeer(
-          device,
-          timeout: _config.handshakeTimeout,
-        );
-        if (_config.autoConnect &&
-            _peerManager.connectedPeers.length < _config.maxConnections) {
-          await _peerManager.connectToPeer(peer.id);
-        }
-      }
-    } catch (e) {
-      _syncEvents.add(
-        SyncFailed(
-          peer: null,
-          error: 'Peer discovery failed: $e',
-          timestamp: DateTime.now(),
-        ),
-      );
-    }
-  }
-
-  void _handleTransportError(dynamic error) {
-    _syncEvents.add(
-      SyncFailed(
-        peer: null,
-        error: 'Transport error: $error',
-        timestamp: DateTime.now(),
-      ),
-    );
-  }
-
-  @override
-  Future<void> connectToPeer(PeerId peerId) async {
-    if (!_isStarted) {
-      throw SyncException('Synchronizer not started');
-    }
-    await _peerManager.connectToPeer(peerId);
-  }
-
-  Future<SyncResult> _syncWithPeer(Peer peer, {Set<CID>? roots}) async {
-    final startTime = DateTime.now();
-
-    if (!peer.isActive) {
-      throw SyncException('Peer not connected: ${peer.id}');
-    }
-
-    try {
-      _syncEvents.add(SyncStarted(peer: peer, timestamp: startTime));
-
-      // Get the roots to sync (default to all DAG roots if not specified)
-      final syncRoots = roots ?? dag.rootBlocks.map((b) => b.cid).toSet();
-
-      // Find what blocks we need
-      final missingBlocks = <CID>{};
-      for (final root in syncRoots) {
-        final missing = await _findMissingBlocks(peer, root);
-        missingBlocks.addAll(missing);
-      }
-
-      // Request missing blocks
-      final fetchedBlocks = <Block>[];
-      for (final cid in missingBlocks) {
-        try {
-          final block = await _requestBlockFromPeer(peer, cid);
-          if (block != null) {
-            await _store.put(block);
-            _dag.addBlock(block);
-            fetchedBlocks.add(block);
-          }
-        } catch (e) {
-          // Continue with other blocks if one fails
-          continue;
-        }
-      }
-
-      // Send blocks that the peer is missing
-      final sentBlocks = await _sendMissingBlocksToPeer(peer, syncRoots);
-
-      final duration = DateTime.now().difference(startTime);
-      final result = SyncResult(
-        peer: peer,
-        blocksReceived: fetchedBlocks.length,
-        blocksSent: sentBlocks.length,
-        bytesReceived: fetchedBlocks.fold(0, (sum, b) => sum + b.size),
-        bytesSent: sentBlocks.fold(0, (sum, b) => sum + b.size),
-        duration: duration,
-        success: true,
-      );
-
-      _updateStats(result);
-      _syncEvents.add(SyncCompleted(result: result, timestamp: DateTime.now()));
-
-      return result;
-    } catch (e) {
-      final duration = DateTime.now().difference(startTime);
-      final result = SyncResult(
-        peer: peer,
-        blocksReceived: 0,
-        blocksSent: 0,
-        bytesReceived: 0,
-        bytesSent: 0,
-        duration: duration,
-        success: false,
-        error: e.toString(),
-      );
-
-      _syncEvents.add(
-        SyncFailed(peer: peer, error: e.toString(), timestamp: DateTime.now()),
-      );
-
-      return result;
-    }
-  }
-
-  Future<void> _syncWithPeers() async {
-    // TODO: Implement syncing with connected peers
-    throw UnimplementedError('Sync with peers is not implemented');
-  }
-
-  void _startSyncTimer() {
-    _stopContinuousSync();
-
-    _continuousSyncTimer = Timer.periodic(_config.syncInterval, (_) async {
-      try {
-        await _syncWithPeers();
-      } catch (e) {
-        _syncEvents.add(
-          SyncFailed(
-            peer: null,
-            error: 'Continuous sync failed: $e',
-            timestamp: DateTime.now(),
-          ),
-        );
-      }
-    });
-  }
-
-  void _stopContinuousSync() {
-    _continuousSyncTimer?.cancel();
-    _continuousSyncTimer = null;
-  }
-
-  @override
+  /// Announces new blocks to all connected peers.
   Future<void> announceBlocks(Set<CID> cids) async {
-    if (cids.isEmpty) return;
+    if (cids.isEmpty || _transport == null) return;
 
-    final message = Have(cids: cids);
-    await _peerManager.broadcast(message);
+    final haveMessage = Have(cids: cids);
+    await _broadcastMessage(haveMessage);
+
+    _syncEvents.add(BlocksAnnounced(cids: cids, timestamp: DateTime.now()));
   }
 
-  @override
+  /// Requests missing blocks for a DAG root.
   Future<Set<Block>> fetchMissingBlocks(CID root) async {
     final missing = <CID>{};
     final visited = <String>{};
 
-    // Find all missing blocks in the DAG
+    // Find missing blocks by walking the DAG
     await _walkDAG(root, (cid) async {
-      if (visited.contains(cid.toString())) return true;
-      visited.add(cid.toString());
+      final cidString = cid.toString();
+      if (visited.contains(cidString)) return true;
+      visited.add(cidString);
 
       if (!await _store.has(cid)) {
         missing.add(cid);
@@ -343,121 +96,177 @@ class DefaultSynchronizer implements Synchronizer {
       return true;
     });
 
+    if (missing.isEmpty) return {};
+
     // Request missing blocks from peers
-    final fetchedBlocks = <Block>{};
+    final wantMessage = Want(cids: missing);
+    await _broadcastMessage(wantMessage);
 
-    for (final cid in missing) {
-      for (final peer in _peerManager.connectedPeers) {
-        try {
-          final connection = _peerManager.getConnection(peer.id);
-          if (connection == null) continue;
+    _syncEvents.add(BlocksRequested(cids: missing, timestamp: DateTime.now()));
 
-          final block = await connection.requestBlock(cid);
+    // In a real implementation, this would wait for responses
+    // For now, return empty set
+    return {};
+  }
 
-          if (block != null && block.validate()) {
-            await _store.put(block);
-            _dag.addBlock(block);
-            fetchedBlocks.add(block);
-            break; // Found the block, move to next
-          }
-        } catch (e) {
-          // Try next peer
-          continue;
-        }
-      }
+  /// Adds a block to the local store and DAG.
+  Future<void> addBlock(Block block) async {
+    await _store.put(block);
+    _dag.addBlock(block);
+
+    if (_config.announceNewBlocks) {
+      await announceBlocks({block.cid});
     }
-
-    return fetchedBlocks;
   }
 
-  @override
-  Future<SyncStats> getStats() async {
-    return _stats;
-  }
-
-  @override
-  Future<void> stop() async {
-    if (!_isStarted) return;
-
-    // Stop timers
-    _continuousSyncTimer?.cancel();
-    _continuousSyncTimer = null;
-    _discoveryTimer?.cancel();
-    _discoveryTimer = null;
-
-    // Cancel stream subscriptions
-    await _incomingBytesSubscription?.cancel();
-    _incomingBytesSubscription = null;
-
-    // Disconnect all peers
-    await _peerManager.disconnectAll();
-
-    // Dispose of peer manager
-    await _peerManager.dispose();
-
-    // Shutdown transport
-    await _transport.shutdown();
-
+  /// Disposes of the synchronizer and releases resources.
+  Future<void> dispose() async {
+    await _messageSubscription?.cancel();
     await _syncEvents.close();
-    _isStarted = false;
+    _transport = null;
   }
 
   // Private helper methods
 
-  Future<Block?> _requestBlockFromPeer(Peer peer, CID cid) async {
-    // Send Want message to peer requesting the block
-    final wantMessage = Want(cids: {cid});
-    await _peerManager.broadcast(wantMessage); // For now, broadcast to all
+  Future<void> _handleIncomingMessage(TransportMessage message) async {
+    try {
+      final syncMessage = SyncMessageCodec.decode(message.data);
+      if (syncMessage == null) return;
 
-    // In a full implementation, this would:
-    // 1. Send Want message specifically to this peer
-    // 2. Wait for Block response with timeout
-    // 3. Return the received block
-
-    // For now, return null (block not available)
-    return null;
-  }
-
-  Future<Set<CID>> _findMissingBlocks(Peer peer, CID root) async {
-    final missing = <CID>{};
-    final visited = <String>{};
-
-    await _walkDAG(root, (cid) async {
-      if (visited.contains(cid.toString())) return true;
-      visited.add(cid.toString());
-
-      if (!await _store.has(cid)) {
-        // Assume peer might have this block
-        // In a full implementation, we'd check peer's advertised blocks
-        missing.add(cid);
-        return false;
+      switch (syncMessage) {
+        case Want want:
+          await _handleWantMessage(message.senderId, want);
+          break;
+        case Have have:
+          await _handleHaveMessage(message.senderId, have);
+          break;
+        case BlockRequest request:
+          await _handleBlockRequest(message.senderId, request);
+          break;
+        case BlockResponse response:
+          await _handleBlockResponse(message.senderId, response);
+          break;
       }
-      return true;
-    });
-
-    return missing;
+    } catch (e) {
+      _syncEvents.add(
+        SyncError(
+          error: 'Failed to handle message from ${message.senderId.value}: $e',
+          timestamp: DateTime.now(),
+        ),
+      );
+    }
   }
 
-  Future<List<Block>> _sendMissingBlocksToPeer(
-    Peer peer,
-    Set<CID> roots,
+  Future<void> _handleWantMessage(PeerId senderId, Want want) async {
+    // Peer is requesting blocks - send any we have
+    final blocksToSend = <Block>[];
+
+    for (final cid in want.cids) {
+      final block = await _store.get(cid);
+      if (block != null) {
+        blocksToSend.add(block);
+      }
+    }
+
+    // Send blocks to the requesting peer
+    for (final block in blocksToSend) {
+      final response = BlockResponse(block: block);
+      await _sendMessage(senderId, response);
+    }
+
+    if (blocksToSend.isNotEmpty) {
+      _updateStats(blocksSent: blocksToSend.length);
+    }
+  }
+
+  Future<void> _handleHaveMessage(PeerId senderId, Have have) async {
+    if (!_config.autoRequestMissing) return;
+
+    // Check which blocks we need
+    final needed = <CID>{};
+    for (final cid in have.cids) {
+      if (!await _store.has(cid)) {
+        needed.add(cid);
+      }
+    }
+
+    if (needed.isNotEmpty) {
+      final request = Want(cids: needed);
+      await _sendMessage(senderId, request);
+    }
+  }
+
+  Future<void> _handleBlockRequest(
+    PeerId senderId,
+    BlockRequest request,
   ) async {
-    final sentBlocks = <Block>[];
+    final block = await _store.get(request.cid);
+    if (block != null) {
+      final response = BlockResponse(block: block);
+      await _sendMessage(senderId, response);
+      _updateStats(blocksSent: 1);
+    }
+  }
 
-    // This is a simplified implementation
-    // In practice, you'd want to:
-    // 1. Check what blocks the peer is missing (via Want messages)
-    // 2. Send Have messages for blocks we have
-    // 3. Send Block messages when peer requests them
+  Future<void> _handleBlockResponse(
+    PeerId senderId,
+    BlockResponse response,
+  ) async {
+    final block = response.block;
 
-    return sentBlocks;
+    // Validate and store the block
+    if (block.validate()) {
+      await _store.put(block);
+      _dag.addBlock(block);
+
+      _updateStats(blocksReceived: 1);
+
+      _syncEvents.add(
+        BlockReceived(
+          cid: block.cid,
+          fromPeer: senderId,
+          timestamp: DateTime.now(),
+        ),
+      );
+    }
+  }
+
+  Future<void> _broadcastMessage(SyncMessage message) async {
+    final transport = _transport;
+    if (transport == null) return;
+
+    // Broadcast to all connected peers
+    for (final peer in transport.peers.where(
+      (p) => p.status == PeerStatus.connected,
+    )) {
+      await _sendMessage(peer.id, message);
+    }
+  }
+
+  Future<void> _sendMessage(PeerId recipientId, SyncMessage message) async {
+    final transport = _transport;
+    if (transport == null) return;
+
+    final transportMessage = TransportMessage(
+      senderId: transport.localPeerId,
+      recipientId: recipientId,
+      data: message.toBytes(),
+      timestamp: DateTime.now(),
+    );
+
+    await transport.sendMessage(transportMessage);
   }
 
   Future<void> _walkDAG(CID root, Future<bool> Function(CID) visitor) async {
     final stack = <CID>[root];
+    final visited = <String>{};
 
     while (stack.isNotEmpty) {
       final cid = stack.removeLast();
+      final cidString = cid.toString();
+
+      if (visited.contains(cidString)) continue;
+      visited.add(cidString);
 
       if (!await visitor(cid)) continue;
 
@@ -470,248 +279,99 @@ class DefaultSynchronizer implements Synchronizer {
     }
   }
 
-  void _updateStats(SyncResult result) {
+  void _handleTransportError(dynamic error) {
+    _syncEvents.add(
+      SyncError(error: 'Transport error: $error', timestamp: DateTime.now()),
+    );
+  }
+
+  void _updateStats({int blocksReceived = 0, int blocksSent = 0}) {
     _stats = SyncStats(
-      totalSyncs: _stats.totalSyncs + 1,
-      successfulSyncs: _stats.successfulSyncs + (result.success ? 1 : 0),
-      totalBlocksReceived: _stats.totalBlocksReceived + result.blocksReceived,
-      totalBlocksSent: _stats.totalBlocksSent + result.blocksSent,
-      totalBytesReceived: _stats.totalBytesReceived + result.bytesReceived,
-      totalBytesSent: _stats.totalBytesSent + result.bytesSent,
+      totalBlocksReceived: _stats.totalBlocksReceived + blocksReceived,
+      totalBlocksSent: _stats.totalBlocksSent + blocksSent,
       lastSyncTime: DateTime.now(),
     );
   }
 }
 
-/// Result of a synchronization operation.
-@immutable
-class SyncResult {
-  /// Creates a sync result.
-  const SyncResult({
-    required this.peer,
-    required this.blocksReceived,
-    required this.blocksSent,
-    required this.bytesReceived,
-    required this.bytesSent,
-    required this.duration,
-    required this.success,
-    this.error,
-  });
-
-  /// The peer that was synchronized with.
-  final Peer peer;
-
-  /// Number of blocks received from the peer.
-  final int blocksReceived;
-
-  /// Number of blocks sent to the peer.
-  final int blocksSent;
-
-  /// Number of bytes received.
-  final int bytesReceived;
-
-  /// Number of bytes sent.
-  final int bytesSent;
-
-  /// Duration of the synchronization.
-  final Duration duration;
-
-  /// Whether the synchronization was successful.
-  final bool success;
-
-  /// Error message if the synchronization failed.
-  final String? error;
-
-  @override
-  String toString() =>
-      'SyncResult('
-      'peer: ${peer.id}, '
-      'received: $blocksReceived blocks ($bytesReceived bytes), '
-      'sent: $blocksSent blocks ($bytesSent bytes), '
-      'duration: ${duration.inMilliseconds}ms, '
-      'success: $success'
-      ')';
-}
-
 /// Statistics about synchronization operations.
 @immutable
 class SyncStats {
-  /// Creates sync statistics.
   const SyncStats({
-    required this.totalSyncs,
-    required this.successfulSyncs,
     required this.totalBlocksReceived,
     required this.totalBlocksSent,
-    required this.totalBytesReceived,
-    required this.totalBytesSent,
     this.lastSyncTime,
   });
 
-  /// Total number of sync operations performed.
-  final int totalSyncs;
-
-  /// Number of successful sync operations.
-  final int successfulSyncs;
-
-  /// Total blocks received across all syncs.
   final int totalBlocksReceived;
-
-  /// Total blocks sent across all syncs.
   final int totalBlocksSent;
-
-  /// Total bytes received across all syncs.
-  final int totalBytesReceived;
-
-  /// Total bytes sent across all syncs.
-  final int totalBytesSent;
-
-  /// Timestamp of the last sync operation.
   final DateTime? lastSyncTime;
 
-  /// Creates empty statistics.
   factory SyncStats.empty() {
-    return const SyncStats(
-      totalSyncs: 0,
-      successfulSyncs: 0,
-      totalBlocksReceived: 0,
-      totalBlocksSent: 0,
-      totalBytesReceived: 0,
-      totalBytesSent: 0,
-    );
+    return const SyncStats(totalBlocksReceived: 0, totalBlocksSent: 0);
   }
-
-  /// Success rate as a percentage.
-  double get successRate => totalSyncs > 0 ? successfulSyncs / totalSyncs : 0.0;
 
   @override
   String toString() =>
       'SyncStats('
-      'syncs: $successfulSyncs/$totalSyncs (${(successRate * 100).toStringAsFixed(1)}%), '
-      'blocks: ${totalBlocksReceived + totalBlocksSent}, '
-      'bytes: ${totalBytesReceived + totalBytesSent}'
+      'received: $totalBlocksReceived, '
+      'sent: $totalBlocksSent'
       ')';
 }
 
 /// Base class for synchronization events.
 @immutable
 sealed class SyncEvent {
-  /// Creates a sync event.
   const SyncEvent({required this.timestamp});
-
-  /// When this event occurred.
   final DateTime timestamp;
 }
 
-/// Event when synchronization starts.
+/// Event when blocks are announced to peers.
 @immutable
-final class SyncStarted extends SyncEvent {
-  /// Creates a sync started event.
-  const SyncStarted({required this.peer, required super.timestamp});
-
-  /// The peer being synchronized with.
-  final Peer peer;
+final class BlocksAnnounced extends SyncEvent {
+  const BlocksAnnounced({required this.cids, required super.timestamp});
+  final Set<CID> cids;
 }
 
-/// Event when synchronization completes successfully.
+/// Event when blocks are requested from peers.
 @immutable
-final class SyncCompleted extends SyncEvent {
-  /// Creates a sync completed event.
-  const SyncCompleted({required this.result, required super.timestamp});
-
-  /// The result of the synchronization.
-  final SyncResult result;
+final class BlocksRequested extends SyncEvent {
+  const BlocksRequested({required this.cids, required super.timestamp});
+  final Set<CID> cids;
 }
 
-/// Event when synchronization fails.
+/// Event when a block is received from a peer.
 @immutable
-final class SyncFailed extends SyncEvent {
-  /// Creates a sync failed event.
-  const SyncFailed({
-    required this.peer,
-    required this.error,
+final class BlockReceived extends SyncEvent {
+  const BlockReceived({
+    required this.cid,
+    required this.fromPeer,
     required super.timestamp,
   });
 
-  /// The peer that the sync failed with (null for general failures).
-  final Peer? peer;
+  final CID cid;
+  final PeerId fromPeer;
+}
 
-  /// The error that caused the failure.
+/// Event when a sync error occurs.
+@immutable
+final class SyncError extends SyncEvent {
+  const SyncError({required this.error, required super.timestamp});
   final String error;
-}
-
-/// Event when new blocks are discovered during sync.
-@immutable
-final class BlocksDiscovered extends SyncEvent {
-  /// Creates a blocks discovered event.
-  const BlocksDiscovered({
-    required this.blocks,
-    required this.peer,
-    required super.timestamp,
-  });
-
-  /// The blocks that were discovered.
-  final Set<CID> blocks;
-
-  /// The peer that provided the blocks.
-  final Peer peer;
-}
-
-/// Event when blocks are successfully fetched.
-@immutable
-final class BlocksFetched extends SyncEvent {
-  /// Creates a blocks fetched event.
-  const BlocksFetched({
-    required this.blocks,
-    required this.peer,
-    required super.timestamp,
-  });
-
-  /// The blocks that were fetched.
-  final Set<Block> blocks;
-
-  /// The peer that provided the blocks.
-  final Peer peer;
 }
 
 /// Exception thrown when synchronization operations fail.
 class SyncException implements Exception {
-  /// Creates a sync exception.
-  const SyncException(this.message, {this.peer, this.cause});
+  const SyncException(this.message, {this.cause});
 
-  /// The error message.
   final String message;
-
-  /// The peer involved in the failed operation, if any.
-  final Peer? peer;
-
-  /// The underlying cause of the error.
   final Object? cause;
 
   @override
   String toString() {
-    final buffer = StringBuffer('SyncException: $message');
-    if (peer != null) {
-      buffer.write(' (peer: ${peer!.id})');
-    }
     if (cause != null) {
-      buffer.write(' (caused by: $cause)');
+      return 'SyncException: $message (caused by: $cause)';
     }
-    return buffer.toString();
+    return 'SyncException: $message';
   }
-}
-
-/// Exception thrown when a required block cannot be found.
-class BlockNotFoundException extends SyncException {
-  /// Creates a block not found exception.
-  const BlockNotFoundException(CID cid, {super.peer})
-    : super('Block not found: $cid');
-
-  /// The CID that could not be found.
-  CID get cid => CID.parse(message.split(': ')[1]);
-}
-
-/// Exception thrown when synchronization times out.
-class SyncTimeoutException extends SyncException {
-  /// Creates a sync timeout exception.
-  const SyncTimeoutException(String message, {super.peer}) : super(message);
 }

@@ -13,6 +13,8 @@ resolution: workspace
 
 dependencies:
   meta: ^1.12.0
+  transport:
+    path: ../transport
 
 dev_dependencies:
   test: ^1.25.0
