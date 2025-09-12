@@ -14,6 +14,13 @@ class PeerConfig {
   /// Display name for this node during peer discovery.
   final String? displayName;
 
+  /// Interval between synchronization attempts.
+  ///
+  /// This determines how frequently this node will synchronize its state
+  /// with its peers. Shorter intervals provide faster synchronization but
+  /// higher resource usage.
+  final Duration syncInterval;
+
   /// Interval between peer discovery attempts.
   ///
   /// This determines how frequently this node will scan for new peers.
@@ -87,6 +94,7 @@ class PeerConfig {
   const PeerConfig({
     required this.nodeId,
     this.displayName,
+    this.syncInterval = const Duration(seconds: 5),
     this.discoveryInterval = const Duration(seconds: 30),
     this.connectionTimeout = const Duration(seconds: 10),
     this.handshakeTimeout = const Duration(seconds: 5),

@@ -231,8 +231,8 @@ void main() {
 
   group('Peer', () {
     test('creates peer with metadata', () {
-      final transportPeer = TransportPeer(
-        address: TransportPeerAddress('127.0.0.1:8080'),
+      final transportPeer = TransportDevice(
+        address: TransportDeviceAddress('127.0.0.1:8080'),
         displayName: 'Test Peer',
         protocol: 'tcp',
       );
@@ -249,18 +249,18 @@ void main() {
     });
 
     test('equality and hashing work correctly', () {
-      final transportPeer1 = TransportPeer(
-        address: TransportPeerAddress('127.0.0.1:8080'),
+      final transportPeer1 = TransportDevice(
+        address: TransportDeviceAddress('127.0.0.1:8080'),
         displayName: 'Test Peer',
         protocol: 'tcp',
       );
-      final transportPeer2 = TransportPeer(
-        address: TransportPeerAddress('127.0.0.1:8080'),
+      final transportPeer2 = TransportDevice(
+        address: TransportDeviceAddress('127.0.0.1:8080'),
         displayName: 'Test Peer',
         protocol: 'tcp',
       );
-      final transportPeer3 = TransportPeer(
-        address: TransportPeerAddress('127.0.0.1:8080'),
+      final transportPeer3 = TransportDevice(
+        address: TransportDeviceAddress('127.0.0.1:8080'),
         displayName: 'Different Peer',
         protocol: 'tcp',
       );

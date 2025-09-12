@@ -71,8 +71,11 @@ print('DAG has ${stats.totalBlocks} blocks, ${stats.totalSize} bytes');
 final synchronizer = DefaultSynchronizer(
   store: store,
   dag: dag,
-  peerManager: myPeerManager,
+  transport: transport,
+  config: config,
 );
+
+await synchronizer.initialize();
 
 // Sync with a specific peer
 final peer = Peer(id: 'peer-123', address: '127.0.0.1:8080');

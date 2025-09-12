@@ -5,12 +5,16 @@ import 'cid.dart';
 import 'dag.dart';
 import 'store.dart';
 import 'peer.dart';
+import 'transport.dart';
+import 'peer_config.dart';
+import 'generic_peer_manager.dart';
 
 /// Interface for synchronizing Merkle DAGs between peers.
 ///
 /// The synchronizer manages the process of discovering missing blocks,
 /// requesting them from peers, and keeping the local DAG up to date
 /// with changes from the network.
+/// TODO: remove this interface, and just have a single implementation.
 abstract interface class Synchronizer {
   /// The local store containing blocks.
   Store get store;
@@ -23,29 +27,6 @@ abstract interface class Synchronizer {
 
   /// Stream of synchronization events.
   Stream<SyncEvent> get syncEvents;
-
-  /// Synchronizes with a specific peer.
-  ///
-  /// Compares the local state with the peer's state and exchanges
-  /// any missing blocks to achieve consistency.
-  Future<SyncResult> syncWithPeer(Peer peer, {Set<CID>? roots});
-
-  /// Synchronizes with all connected peers.
-  ///
-  /// Performs synchronization with each connected peer in parallel.
-  Future<List<SyncResult>> syncWithAllPeers({Set<CID>? roots});
-
-  /// Starts continuous synchronization in the background.
-  ///
-  /// The synchronizer will periodically check for updates from peers
-  /// and sync any new content automatically.
-  void startContinuousSync({Duration interval = const Duration(seconds: 30)});
-
-  /// Stops continuous synchronization.
-  void stopContinuousSync();
-
-  /// Whether continuous synchronization is running.
-  bool get isContinuousSyncRunning;
 
   /// Announces new blocks to peers.
   ///
@@ -62,30 +43,75 @@ abstract interface class Synchronizer {
   /// Gets synchronization statistics.
   Future<SyncStats> getStats();
 
+  /// Gets peer statistics.
+  Future<PeerStats> getPeerStats();
+
+  /// Connects to a peer by ID.
+  Future<void> connectToPeer(PeerId peerId);
+
+  /// Stream of peer connection events.
+  Stream<PeerEvent> get peerEvents;
+
+  /// All currently connected peers.
+  Iterable<Peer> get connectedPeers;
+
+  /// Initializes the synchronizer and starts orchestration.
+  Future<void> start();
+
   /// Closes the synchronizer and releases resources.
-  Future<void> close();
+  Future<void> stop();
 }
 
 /// Default implementation of the Synchronizer interface.
+///
+/// This synchronizer fully manages both the transport layer and peer manager
+/// internally. The application only needs to provide the transport and config,
+/// and the synchronizer handles all peer discovery, connection management,
+/// and synchronization operations.
 class DefaultSynchronizer implements Synchronizer {
   /// Creates a new synchronizer.
+  ///
+  /// The synchronizer will create and fully manage the peer manager internally.
+  /// The application should not interact with the peer manager directly.
+  ///
+  /// Example:
+  /// ```dart
+  /// final synchronizer = DefaultSynchronizer(
+  ///   store: _store,
+  ///   dag: _dag,
+  ///   transport: transport,
+  ///   config: config,
+  /// );
+  /// await synchronizer.initialize();
+  /// ```
   DefaultSynchronizer({
     required Store store,
     required DAG dag,
-    required PeerManager peerManager,
+    required Transport transport,
+    required PeerConfig config,
+    PeerManager? peerManager,
   }) : _store = store,
        _dag = dag,
-       _peerManager = peerManager,
+       _transport = transport,
+       _config = config,
+       _peerManager = peerManager ?? GenericPeerManager(config: config),
        _syncEvents = StreamController<SyncEvent>.broadcast(),
        _continuousSyncTimer = null,
-       _stats = SyncStats.empty();
+       _discoveryTimer = null,
+       _stats = SyncStats.empty(),
+       _isStarted = false;
 
   final Store _store;
   final DAG _dag;
+  final Transport _transport;
+  final PeerConfig _config;
   final PeerManager _peerManager;
   final StreamController<SyncEvent> _syncEvents;
   Timer? _continuousSyncTimer;
+  Timer? _discoveryTimer;
   SyncStats _stats;
+  bool _isStarted;
+  StreamSubscription<IncomingBytes>? _incomingBytesSubscription;
 
   @override
   Store get store => _store;
@@ -100,10 +126,94 @@ class DefaultSynchronizer implements Synchronizer {
   Stream<SyncEvent> get syncEvents => _syncEvents.stream;
 
   @override
-  bool get isContinuousSyncRunning => _continuousSyncTimer?.isActive == true;
+  Future<PeerStats> getPeerStats() async {
+    return await _peerManager.getStats();
+  }
 
   @override
-  Future<SyncResult> syncWithPeer(Peer peer, {Set<CID>? roots}) async {
+  Stream<PeerEvent> get peerEvents => _peerManager.peerEvents;
+
+  @override
+  Iterable<Peer> get connectedPeers => _peerManager.connectedPeers;
+
+  @override
+  Future<void> start() async {
+    if (_isStarted) return;
+
+    await _transport.initialize();
+    _setupIncomingMessageHandlers();
+    _startSyncTimer();
+    _startPeerDiscoveryTimer();
+
+    _isStarted = true;
+  }
+
+  void _setupIncomingMessageHandlers() {
+    _incomingBytesSubscription = _transport.incomingBytes.listen(
+      _peerManager.handleIncomingBytes,
+      onError: _handleTransportError,
+    );
+
+    _peerManager.outgoingBytes.listen(
+      _transport.sendBytes,
+      onError: _handleTransportError,
+    );
+  }
+
+  void _startPeerDiscoveryTimer() {
+    if (_config.discoveryInterval <= Duration.zero) return;
+
+    _discoveryTimer = Timer.periodic(_config.discoveryInterval, (_) async {
+      await _discoverPeers();
+    });
+  }
+
+  /// Orchestrates peer discovery: transport finds peers, peer manager handles them
+  Future<void> _discoverPeers() async {
+    if (!_isStarted) return;
+
+    try {
+      final discoveredDevices = await _transport.discoverDevices();
+
+      for (final device in discoveredDevices) {
+        // TODO: catch connection failures so we don't prevent other devices from connecting.
+        final peer = await _peerManager.registerDeviceAsPeer(
+          device,
+          timeout: _config.handshakeTimeout,
+        );
+        if (_config.autoConnect &&
+            _peerManager.connectedPeers.length <= _config.maxConnections) {
+          await _peerManager.connectToPeer(peer.id);
+        }
+      }
+    } catch (e) {
+      _syncEvents.add(
+        SyncFailed(
+          peer: null,
+          error: 'Peer discovery failed: $e',
+          timestamp: DateTime.now(),
+        ),
+      );
+    }
+  }
+
+  void _handleTransportError(dynamic error) {
+    _syncEvents.add(
+      SyncFailed(
+        peer: null,
+        error: 'Transport error: $error',
+        timestamp: DateTime.now(),
+      ),
+    );
+  }
+
+  @override
+  Future<void> connectToPeer(PeerId peerId) async {
+    if (!_isStarted) return;
+    await _peerManager.connectToPeer(peerId);
+  }
+
+  Future<SyncResult> _syncWithPeer(Peer peer, {Set<CID>? roots}) async {
     final startTime = DateTime.now();
     final connection = _peerManager.getConnection(peer.id);
     if (connection == null) {
@@ -173,20 +283,17 @@ class DefaultSynchronizer implements Synchronizer {
     }
   }
 
-  @override
-  Future<List<SyncResult>> syncWithAllPeers({Set<CID>? roots}) async {
-    final peers = peerManager.connectedPeers.toList();
-    final futures = peers.map((peer) => syncWithPeer(peer, roots: roots));
-    return await Future.wait(futures);
+  Future<void> _syncWithPeers() async {
+    // TODO: Implement syncing with connected peers
+    throw UnimplementedError('Sync with peers is not implemented');
   }
 
-  @override
-  void startContinuousSync({Duration interval = const Duration(seconds: 30)}) {
-    stopContinuousSync();
+  void _startSyncTimer() {
+    _stopContinuousSync();
 
-    _continuousSyncTimer = Timer.periodic(interval, (_) async {
+    _continuousSyncTimer = Timer.periodic(_config.syncInterval, (_) async {
       try {
-        await syncWithAllPeers();
+        await _syncWithPeers();
       } catch (e) {
         _syncEvents.add(
           SyncFailed(
@@ -199,8 +306,7 @@ class DefaultSynchronizer implements Synchronizer {
     });
   }
 
-  @override
-  void stopContinuousSync() {
+  void _stopContinuousSync() {
     _continuousSyncTimer?.cancel();
     _continuousSyncTimer = null;
   }
@@ -263,9 +369,28 @@ class DefaultSynchronizer implements Synchronizer {
   }
 
   @override
-  Future<void> close() async {
-    stopContinuousSync();
+  Future<void> stop() async {
+    _stopContinuousSync();
+
+    // Stop discovery
+    _discoveryTimer?.cancel();
+    _discoveryTimer = null;
+
+    // Cancel incoming bytes subscription
+    await _incomingBytesSubscription?.cancel();
+    _incomingBytesSubscription = null;
+
+    // Disconnect all peers
+    await _peerManager.disconnectAll();
+
+    // Dispose of peer manager
+    await _peerManager.dispose();
+
+    // Shutdown transport
+    await _transport.shutdown();
+
     await _syncEvents.close();
+    _isStarted = false;
   }
 
   // Private helper methods

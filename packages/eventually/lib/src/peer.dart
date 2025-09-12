@@ -52,7 +52,7 @@ class Peer {
   final PeerId id;
 
   /// Transport-level information for reaching this peer.
-  final TransportPeer transportPeer;
+  final TransportDevice transportPeer;
 
   /// Additional application-layer metadata about the peer.
   /// May contain capabilities, preferences, version info, etc.
@@ -65,7 +65,7 @@ class Peer {
   final bool isActive;
 
   /// Gets the transport address for this peer.
-  TransportPeerAddress get address => transportPeer.address;
+  TransportDeviceAddress get address => transportPeer.address;
 
   /// Gets the display name for this peer.
   String get displayName => transportPeer.displayName;
@@ -76,7 +76,7 @@ class Peer {
   /// Creates a copy of this peer with updated properties.
   Peer copyWith({
     PeerId? id,
-    TransportPeer? transportPeer,
+    TransportDevice? transportPeer,
     Map<String, dynamic>? metadata,
     DateTime? lastContactTime,
     bool? isActive,
@@ -111,7 +111,6 @@ class Peer {
 /// This provides the foundation for exchanging messages, blocks, and
 /// synchronization information between peers in the network.
 /// The peer identity is established during connection handshake.
-@Deprecated('Use Peer and Transport instead')
 abstract interface class PeerConnection {
   /// The peer this connection is established with.
   /// This is null until the peer identity is discovered during handshake.
@@ -356,14 +355,31 @@ abstract interface class PeerManager {
   /// All currently connected peers.
   Iterable<Peer> get connectedPeers;
 
+  /// All peers, connected or disconnected.
+  Iterable<Peer> get peers;
+
   /// Stream of peer connection events.
   Stream<PeerEvent> get peerEvents;
 
-  /// Connects to a transport endpoint and performs peer discovery.
-  /// Returns a connection once the peer identity is established.
-  Future<PeerConnection> connectToEndpoint(TransportPeerAddress address);
+  /// Stream of bytes that should be sent to the transport.
+  /// The synchronizer will forward these bytes to the transport.
+  Stream<OutgoingBytes> get outgoingBytes;
+
+  /// Handles incoming bytes from a transport device.
+  Future<void> handleIncomingBytes(IncomingBytes incomingBytes);
+
+  /// Performs the initial handshake protocol and creates the peer in a disconnected state.
+  /// The peer will need to be connected to before data can be synce to it.
+  Future<Peer> registerDeviceAsPeer(
+    TransportDevice device, {
+    Duration? timeout,
+  });
+
+  /// Connects to a peer so we can begin communicating with it.
+  Future<void> connectToPeer(PeerId peerId);
 
   /// Gets the connection for a known peer.
+  @Deprecated('Cannot directly access peer connections')
   PeerConnection? getConnection(PeerId peerId);
 
   /// Disconnects from a peer.
@@ -371,12 +387,6 @@ abstract interface class PeerManager {
 
   /// Disconnects from all peers.
   Future<void> disconnectAll();
-
-  /// Starts discovering transport endpoints.
-  Future<void> startDiscovery();
-
-  /// Stops discovering transport endpoints.
-  Future<void> stopDiscovery();
 
   /// Finds peers that might have a specific block.
   Future<List<Peer>> findPeersWithBlock(CID cid);
@@ -386,6 +396,8 @@ abstract interface class PeerManager {
 
   /// Gets statistics about peer connections.
   Future<PeerStats> getStats();
+
+  Future<void> dispose() async {}
 }
 
 /// Events related to peer connections.

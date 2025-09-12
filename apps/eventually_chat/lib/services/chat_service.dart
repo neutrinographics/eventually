@@ -33,7 +33,7 @@ class ChatService with ChangeNotifier {
   late final HiveDAGStore _store;
   late final DAG _dag;
   late final ChatNearbyTransport _transport;
-  late final TransportPeerManager _peerManager;
+
   late final DefaultSynchronizer _synchronizer;
 
   final List<ChatMessage> _messages = [];
@@ -65,7 +65,7 @@ class ChatService with ChangeNotifier {
   int get messageCount => _messages.length;
   int get peerCount => _peers.length;
   int get onlinePeerCount => onlinePeers.length;
-  bool get hasConnectedPeers => _peerManager.connectedPeers.isNotEmpty;
+  bool get hasConnectedPeers => _synchronizer.connectedPeers.isNotEmpty;
 
   /// Sets the user name and saves it to preferences.
   Future<void> setUserName(String name) async {
@@ -125,19 +125,15 @@ class ChatService with ChangeNotifier {
         healthCheckInterval: const Duration(seconds: 60),
       );
 
-      _peerManager = TransportPeerManager(
+      // Initialize synchronizer - it will manage the peer manager internally
+      _synchronizer = DefaultSynchronizer(
+        store: _store,
+        dag: _dag,
         transport: _transport,
         config: config,
       );
 
-      // Initialize synchronizer
-      _synchronizer = DefaultSynchronizer(
-        store: _store,
-        dag: _dag,
-        peerManager: _peerManager,
-      );
-
-      await _peerManager.initialize();
+      await _synchronizer.start();
       await _loadExistingData();
       _setupEventListeners();
 
@@ -165,8 +161,7 @@ class ChatService with ChangeNotifier {
       _error = null;
       notifyListeners();
 
-      await _peerManager.startDiscovery();
-      _synchronizer.startContinuousSync(interval: const Duration(seconds: 45));
+      await _synchronizer.start();
 
       // Start announcing presence
       _startPresenceAnnouncement();
@@ -189,8 +184,7 @@ class ChatService with ChangeNotifier {
 
     try {
       _presenceTimer?.cancel();
-      _synchronizer.stopContinuousSync();
-      await _peerManager.stopDiscovery();
+      await _synchronizer.stop();
 
       _isStarted = false;
       debugPrint('🛑 Chat service stopped');
@@ -285,7 +279,7 @@ class ChatService with ChangeNotifier {
 
   /// Gets peer statistics.
   Future<PeerStats> getPeerStats() async {
-    return await _peerManager.getStats();
+    return await _synchronizer.getPeerStats();
   }
 
   /// Gets transport connection statistics.
@@ -298,27 +292,15 @@ class ChatService with ChangeNotifier {
   }
 
   /// Manually discovers peers.
-  Future<List<TransportPeer>> discoverPeers() async {
+  Future<List<TransportDevice>> discoverPeers() async {
     try {
-      final peers = await _transport.discoverPeers(
+      final peers = await _transport.discoverDevices(
         timeout: const Duration(seconds: 5),
       );
       debugPrint('🔍 Discovered ${peers.length} peers');
       return peers;
     } catch (e) {
       debugPrint('❌ Discovery failed: $e');
-      return [];
-    }
-  }
-
-  /// Manually syncs with all connected peers.
-  Future<List<SyncResult>> syncWithAllPeers() async {
-    try {
-      final results = await _synchronizer.syncWithAllPeers();
-      debugPrint('🔄 Sync completed with ${results.length} peers');
-      return results;
-    } catch (e) {
-      debugPrint('❌ Sync failed: $e');
       return [];
     }
   }
@@ -373,7 +355,7 @@ class ChatService with ChangeNotifier {
     );
 
     // Listen to peer events
-    _peerEventSubscription = _peerManager.peerEvents.listen(
+    _peerEventSubscription = _synchronizer.peerEvents.listen(
       _handlePeerEvent,
       onError: (e) => debugPrint('Peer event error: $e'),
     );
@@ -384,7 +366,7 @@ class ChatService with ChangeNotifier {
     ) {
       // This is handled by the peer manager, but we can log it
       debugPrint(
-        '📨 Received ${incomingBytes.bytes.length} bytes from ${incomingBytes.peer.displayName}',
+        '📨 Received ${incomingBytes.bytes.length} bytes from ${incomingBytes.device.displayName}',
       );
     }, onError: (e) => debugPrint('Incoming bytes error: $e'));
   }
@@ -572,8 +554,8 @@ class ChatService with ChangeNotifier {
 
     if (_isInitialized) {
       await stop();
-      await _peerManager.dispose();
-      await _synchronizer.close();
+
+      await _synchronizer.stop();
       await _store.close();
     }
 

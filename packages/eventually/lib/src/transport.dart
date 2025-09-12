@@ -2,13 +2,16 @@ import 'dart:typed_data';
 
 import 'package:meta/meta.dart';
 
-/// Type-safe address for transport peers (transport-specific addresses).
-class TransportPeerAddress {
+/// Type-safe address for transport devices.
+/// For example, this could be a MAC address, IP address, or any other
+/// unique identifier used by the transport protocol.
+@immutable
+class TransportDeviceAddress {
   /// The underlying string address.
   final String value;
 
   /// Creates a transport peer address.
-  const TransportPeerAddress(this.value);
+  const TransportDeviceAddress(this.value);
 
   @override
   String toString() => value;
@@ -16,7 +19,7 @@ class TransportPeerAddress {
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
-    if (other is! TransportPeerAddress) return false;
+    if (other is! TransportDeviceAddress) return false;
     return value == other.value;
   }
 
@@ -24,13 +27,14 @@ class TransportPeerAddress {
   int get hashCode => value.hashCode;
 }
 
-/// Transport-level peer representation.
-/// This represents a peer at the transport layer before we know their node ID.
+/// Transport-level device representation.
+/// This represents a remote device at the transport layer.
 @immutable
-class TransportPeer {
-  final TransportPeerAddress address;
+class TransportDevice {
+  final TransportDeviceAddress address;
 
-  /// Display name discovered during peer discovery.
+  /// The advertised display name of this device.
+  /// This is typically a human-readable name.
   final String displayName;
 
   /// Transport protocol identifier.
@@ -46,7 +50,7 @@ class TransportPeer {
   /// Optional metadata about this transport peer.
   final Map<String, dynamic> metadata;
 
-  TransportPeer({
+  TransportDevice({
     required this.address,
     required this.displayName,
     required this.protocol,
@@ -56,15 +60,15 @@ class TransportPeer {
   }) : connectedAt = connectedAt ?? DateTime.now();
 
   /// Creates a copy with modified values.
-  TransportPeer copyWith({
-    TransportPeerAddress? address,
+  TransportDevice copyWith({
+    TransportDeviceAddress? address,
     String? displayName,
     String? protocol,
     DateTime? connectedAt,
     bool? isActive,
     Map<String, dynamic>? metadata,
   }) {
-    return TransportPeer(
+    return TransportDevice(
       address: address ?? this.address,
       displayName: displayName ?? this.displayName,
       protocol: protocol ?? this.protocol,
@@ -82,7 +86,7 @@ class TransportPeer {
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
-    if (other is! TransportPeer) return false;
+    if (other is! TransportDevice) return false;
     return address == other.address && protocol == other.protocol;
   }
 
@@ -122,7 +126,7 @@ abstract class Transport {
   /// no peers are currently available.
   ///
   /// Throws [TransportException] if discovery fails.
-  Future<List<TransportPeer>> discoverPeers({Duration? timeout});
+  Future<List<TransportDevice>> discoverDevices({Duration? timeout});
 
   /// Sends bytes to a specific transport peer.
   ///
@@ -131,11 +135,7 @@ abstract class Transport {
   /// direct socket connection, HTTP request, etc.).
   ///
   /// Throws [TransportException] if sending fails.
-  Future<void> sendBytes(
-    TransportPeer peer,
-    Uint8List bytes, {
-    Duration? timeout,
-  });
+  Future<void> sendBytes(OutgoingBytes outgoingBytes, {Duration? timeout});
 
   /// Receives bytes from transport peers.
   ///
@@ -148,16 +148,24 @@ abstract class Transport {
   ///
   /// This can be used for peer health checking and maintenance.
   /// The implementation should be lightweight and fast.
-  Future<bool> isPeerReachable(TransportPeer transportPeer);
+  Future<bool> isPeerReachable(TransportDevice transportPeer);
 }
 
 @immutable
 class IncomingBytes {
-  final TransportPeer peer;
+  final TransportDevice device;
   final Uint8List bytes;
   final DateTime receivedAt;
 
-  IncomingBytes(this.peer, this.bytes, this.receivedAt);
+  IncomingBytes(this.device, this.bytes, this.receivedAt);
+}
+
+@immutable
+class OutgoingBytes {
+  final TransportDevice device;
+  final Uint8List bytes;
+
+  OutgoingBytes(this.device, this.bytes);
 }
 
 /// Exception thrown when transport operations fail.

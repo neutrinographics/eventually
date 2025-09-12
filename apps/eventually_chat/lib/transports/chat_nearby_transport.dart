@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:nearby_connections/nearby_connections.dart';
 import 'package:eventually/eventually.dart';
 
@@ -25,8 +26,8 @@ class ChatNearbyTransport implements Transport {
   bool _isAdvertising = false;
   bool _isDiscovering = false;
 
-  final Map<String, TransportPeer> _discoveredPeers = {};
-  final Map<String, TransportPeer> _connectedPeers = {};
+  final Map<String, TransportDevice> _discoveredPeers = {};
+  final Map<String, TransportDevice> _connectedPeers = {};
   final StreamController<IncomingBytes> _incomingBytesController =
       StreamController<IncomingBytes>.broadcast();
 
@@ -128,7 +129,7 @@ class ChatNearbyTransport implements Transport {
   }
 
   @override
-  Future<List<TransportPeer>> discoverPeers({Duration? timeout}) async {
+  Future<List<TransportDevice>> discoverDevices({Duration? timeout}) async {
     if (!_isInitialized) {
       throw const TransportException('Transport not initialized');
     }
@@ -138,7 +139,7 @@ class ChatNearbyTransport implements Transport {
 
   @override
   Future<void> sendBytes(
-    TransportPeer peer,
+    TransportDevice peer,
     Uint8List bytes, {
     Duration? timeout,
   }) async {
@@ -165,7 +166,7 @@ class ChatNearbyTransport implements Transport {
   Stream<IncomingBytes> get incomingBytes => _incomingBytesController.stream;
 
   @override
-  Future<bool> isPeerReachable(TransportPeer transportPeer) async {
+  Future<bool> isPeerReachable(TransportDevice transportPeer) async {
     if (!_isInitialized) return false;
 
     // Check if we have an active connection to this peer
@@ -177,7 +178,7 @@ class ChatNearbyTransport implements Transport {
   ///
   /// This is useful for initiating chat connections to specific users.
   @Deprecated('You should not manually connect to peers')
-  Future<void> connectToPeer(TransportPeer peer) async {
+  Future<void> connectToPeer(TransportDevice peer) async {
     if (!_isInitialized) {
       throw const TransportException('Transport not initialized');
     }
@@ -213,8 +214,8 @@ class ChatNearbyTransport implements Transport {
   ) {
     print('👋 Found chat user: $endpointName');
 
-    final peer = TransportPeer(
-      address: TransportPeerAddress(endpointId),
+    final peer = TransportDevice(
+      address: TransportDeviceAddress(endpointId),
       displayName: endpointName,
       protocol: 'nearby_connections',
       metadata: {
@@ -311,9 +312,9 @@ class ChatNearbyTransport implements Transport {
     // This could be used for progress tracking on large file transfers
   }
 
-  TransportPeer _createUnknownPeer(String endpointId) {
-    return TransportPeer(
-      address: TransportPeerAddress(endpointId),
+  TransportDevice _createUnknownPeer(String endpointId) {
+    return TransportDevice(
+      address: TransportDeviceAddress(endpointId),
       displayName: 'Unknown User',
       protocol: 'nearby_connections',
       metadata: {
@@ -325,11 +326,11 @@ class ChatNearbyTransport implements Transport {
   }
 
   /// Gets all currently connected chat users.
-  List<TransportPeer> get connectedPeers =>
+  List<TransportDevice> get connectedPeers =>
       _connectedPeers.values.where((peer) => peer.isActive).toList();
 
   /// Gets all discovered chat users (connected and not connected).
-  List<TransportPeer> get discoveredPeers => _discoveredPeers.values.toList();
+  List<TransportDevice> get discoveredPeers => _discoveredPeers.values.toList();
 
   /// Gets the number of connected chat users.
   int get connectedUserCount => connectedPeers.length;

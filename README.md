@@ -84,8 +84,11 @@ dag.addBlock(block);
 final synchronizer = DefaultSynchronizer(
   store: store,
   dag: dag,
-  peerManager: myPeerManager,
+  transport: transport,
+  config: config,
 );
+
+await synchronizer.initialize();
 ```
 
 ## Development
