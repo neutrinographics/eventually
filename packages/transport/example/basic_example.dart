@@ -176,6 +176,7 @@ Future<void> main() async {
       peer2Id,
     ), // Expect to connect to peer2
     approvalHandler: const AutoApprovalHandler(),
+    deviceDiscovery: const NoOpDeviceDiscovery(),
     peerStore: InMemoryPeerStore(),
   );
 
@@ -187,6 +188,7 @@ Future<void> main() async {
       peer1Id,
     ), // Expect connections from peer1
     approvalHandler: const AutoApprovalHandler(),
+    deviceDiscovery: const NoOpDeviceDiscovery(),
     peerStore: InMemoryPeerStore(),
   );
 
@@ -226,33 +228,13 @@ Future<void> main() async {
     await peer1Transport.start();
     await peer2Transport.start();
 
-    // Manually add peer 2 to peer 1's peer list (simulating discovery)
-    print('\n🔍 Simulating peer discovery...');
-    final discoveredPeer2 = Peer(
-      id: peer2Id,
-      address: peer2Address,
-      status: PeerStatus.discovered,
-      lastSeen: DateTime.now(),
-    );
+    // Simulate device discovery and connection
+    print('\n🔍 Simulating device discovery...');
+    print('📱 Found device: peer-2-device at ${peer2Address.value}');
 
-    // Add peer to store (this would normally be done by discovery)
-    await peer1Config.peerStore!.storePeer(discoveredPeer2);
-
-    // Also add peer 1 to peer 2's store for bidirectional messaging
-    final discoveredPeer1 = Peer(
-      id: peer1Id,
-      address: peer1Address,
-      status: PeerStatus.discovered,
-      lastSeen: DateTime.now(),
-    );
-    await peer2Config.peerStore!.storePeer(discoveredPeer1);
-
-    // Wait a moment for the store update to propagate
-    await Future.delayed(const Duration(milliseconds: 100));
-
-    // Try to connect from peer 1 to peer 2
+    // Try to connect from peer 1 to peer 2 by device address
     print('\n🤝 Peer 1 attempting to connect to peer 2...');
-    final connectionResult = await peer1Transport.connectToPeer(peer2Id);
+    final connectionResult = await peer1Transport.connectToDevice(peer2Address);
 
     if (connectionResult.result == ConnectionResult.success) {
       print('✅ Connection successful!');

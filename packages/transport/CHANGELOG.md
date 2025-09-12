@@ -13,23 +13,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `TransportManager` for orchestrating peer connections and messaging
 - Generic peer-to-peer connection management
 - Distinction between device addresses and peer IDs
-- Live updates for peer status changes and incoming messages
+- Live updates for device discovery, peer status changes and incoming messages
 - Customizable handshake protocols with default JSON implementation
 - Connection approval/rejection mechanisms with built-in handlers:
   - `AutoApprovalHandler` - automatically accepts connections
   - `RejectAllHandler` - rejects all connections
   - `ManualApprovalHandler` - custom approval logic via callbacks
-- Peer discovery interface with broadcast-based default implementation
+- Device discovery interface with broadcast-based default implementation
 - Peer storage interface with in-memory default implementation
 - Configurable connection limits and timeouts
 - Comprehensive test suite with mock implementations
 - Example TCP transport protocol implementation
 - Complete documentation and usage examples
 
+### Breaking Changes
+- **BREAKING**: Replaced `PeerDiscovery` with `DeviceDiscovery` interface
+  - `DeviceDiscovery` finds devices before peer identification (more realistic for protocols like Nearby Connections)
+  - `PeerDiscovery.peersDiscovered` → `DeviceDiscovery.devicesDiscovered` 
+  - Peer objects are now only created after successful handshake
+- **BREAKING**: `TransportManager.start()` simplified - no address parameter needed
+- **BREAKING**: `TransportMessage` simplified - removed optional `messageId` field
+- **BREAKING**: Updated `TransportConfig` to use `deviceDiscovery` instead of `peerDiscovery`
+
 ### Design Decisions
-- `TransportManager.start()` method simplified - no address parameter needed as transport protocols handle their own configuration
-- `TransportMessage` simplified - no optional message ID field, applications can include IDs in their payload if needed
-- Transport protocols are responsible for their own listening address configuration
+- Device discovery and peer management are now separate concerns:
+  - **Device Discovery**: Transport-level finding of devices/endpoints (before peer identification)
+  - **Peer Management**: Application-level management of identified peers (after handshake)
+- `connectToDevice(DeviceAddress)` - Connect to discovered device, peer ID learned via handshake
+- `connectToPeer(PeerId)` - Connect to known peer (requires address from peer store)
+- Transport protocols handle their own listening address configuration
+- Applications can include message IDs in payload if needed
 
 ### Features
 - **Transport Protocols**: Pluggable low-level transport implementations
@@ -50,7 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `DeviceAddress` - Network address representation
 - `JsonHandshakeProtocol` - Default JSON-based handshake implementation
 - `InMemoryPeerStore` - Default in-memory peer storage
-- `BroadcastPeerDiscovery` - Default broadcast-based peer discovery
+- `BroadcastDeviceDiscovery` - Default broadcast-based device discovery
+- `NoOpDeviceDiscovery` - No-op device discovery implementation
 
 ### Examples
 - Basic usage example with in-memory transport

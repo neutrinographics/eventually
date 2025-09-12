@@ -140,19 +140,19 @@ class ManualApprovalHandler implements ConnectionApprovalHandler {
   }
 }
 
-/// Interface for peer discovery mechanisms
-abstract interface class PeerDiscovery {
-  /// Start discovering peers
+/// Interface for discovering devices on the network (before peer identification)
+abstract interface class DeviceDiscovery {
+  /// Start discovering devices
   Future<void> startDiscovery();
 
-  /// Stop discovering peers
+  /// Stop discovering devices
   Future<void> stopDiscovery();
 
-  /// Stream of discovered peers
-  Stream<Peer> get peersDiscovered;
+  /// Stream of newly discovered devices
+  Stream<DiscoveredDevice> get devicesDiscovered;
 
-  /// Stream of peers that are no longer available
-  Stream<Peer> get peersLost;
+  /// Stream of devices that are no longer available
+  Stream<DiscoveredDevice> get devicesLost;
 
   /// Whether discovery is currently active
   bool get isDiscovering;
@@ -197,6 +197,26 @@ class PeerRemoved extends PeerStoreEvent {
   const PeerRemoved(super.peer);
 }
 
+/// A no-op device discovery implementation
+class NoOpDeviceDiscovery implements DeviceDiscovery {
+  const NoOpDeviceDiscovery();
+
+  @override
+  bool get isDiscovering => false;
+
+  @override
+  Stream<DiscoveredDevice> get devicesDiscovered => const Stream.empty();
+
+  @override
+  Stream<DiscoveredDevice> get devicesLost => const Stream.empty();
+
+  @override
+  Future<void> startDiscovery() async {}
+
+  @override
+  Future<void> stopDiscovery() async {}
+}
+
 /// Configuration for the transport manager
 class TransportConfig {
   const TransportConfig({
@@ -204,7 +224,7 @@ class TransportConfig {
     required this.protocol,
     required this.handshakeProtocol,
     required this.approvalHandler,
-    this.peerDiscovery,
+    this.deviceDiscovery,
     this.peerStore,
     this.connectionTimeout = const Duration(seconds: 30),
     this.handshakeTimeout = const Duration(seconds: 10),
@@ -223,8 +243,8 @@ class TransportConfig {
   /// Handler for connection approval
   final ConnectionApprovalHandler approvalHandler;
 
-  /// Optional peer discovery mechanism
-  final PeerDiscovery? peerDiscovery;
+  /// Optional device discovery mechanism
+  final DeviceDiscovery? deviceDiscovery;
 
   /// Optional peer store for persistence
   final PeerStore? peerStore;

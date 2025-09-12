@@ -14,7 +14,10 @@ class TransportManager {
       _connectionRequestController =
           StreamController<ConnectionRequest>.broadcast(),
       _connectionResultController =
-          StreamController<ConnectionAttemptResult>.broadcast() {
+          StreamController<ConnectionAttemptResult>.broadcast(),
+      _devicesDiscoveredController =
+          StreamController<DiscoveredDevice>.broadcast(),
+      _devicesLostController = StreamController<DiscoveredDevice>.broadcast() {
     _initialize();
   }
 
@@ -26,10 +29,12 @@ class TransportManager {
   final StreamController<TransportMessage> _messageController;
   final StreamController<ConnectionRequest> _connectionRequestController;
   final StreamController<ConnectionAttemptResult> _connectionResultController;
+  final StreamController<DiscoveredDevice> _devicesDiscoveredController;
+  final StreamController<DiscoveredDevice> _devicesLostController;
 
   StreamSubscription<IncomingConnectionAttempt>? _incomingConnectionsSub;
-  StreamSubscription<Peer>? _peersDiscoveredSub;
-  StreamSubscription<Peer>? _peersLostSub;
+  StreamSubscription<DiscoveredDevice>? _devicesDiscoveredSub;
+  StreamSubscription<DiscoveredDevice>? _devicesLostSub;
   StreamSubscription<PeerStoreEvent>? _peerStoreSub;
 
   bool _isStarted = false;
@@ -48,6 +53,13 @@ class TransportManager {
   /// Stream of connection attempt results
   Stream<ConnectionAttemptResult> get connectionResults =>
       _connectionResultController.stream;
+
+  /// Stream of newly discovered devices
+  Stream<DiscoveredDevice> get devicesDiscovered =>
+      _devicesDiscoveredController.stream;
+
+  /// Stream of devices that are no longer available
+  Stream<DiscoveredDevice> get devicesLost => _devicesLostController.stream;
 
   /// Get all currently known peers
   List<Peer> get peers => _peers.values.toList();
@@ -68,13 +80,13 @@ class TransportManager {
       _handleIncomingConnection,
     );
 
-    // Set up peer discovery if available
-    final discovery = _config.peerDiscovery;
+    // Set up device discovery if available
+    final discovery = _config.deviceDiscovery;
     if (discovery != null) {
-      _peersDiscoveredSub = discovery.peersDiscovered.listen(
-        _handlePeerDiscovered,
+      _devicesDiscoveredSub = discovery.devicesDiscovered.listen(
+        _handleDeviceDiscovered,
       );
-      _peersLostSub = discovery.peersLost.listen(_handlePeerLost);
+      _devicesLostSub = discovery.devicesLost.listen(_handleDeviceLost);
     }
 
     // Set up peer store if available
@@ -92,8 +104,8 @@ class TransportManager {
       // Start listening for connections
       await _config.protocol.startListening();
 
-      // Start peer discovery if available
-      final discovery = _config.peerDiscovery;
+      // Start device discovery if available
+      final discovery = _config.deviceDiscovery;
       if (discovery != null) {
         await discovery.startDiscovery();
       }
@@ -127,8 +139,8 @@ class TransportManager {
     await Future.wait(disconnectFutures);
     _connections.clear();
 
-    // Stop peer discovery
-    final discovery = _config.peerDiscovery;
+    // Stop device discovery
+    final discovery = _config.deviceDiscovery;
     if (discovery != null && discovery.isDiscovering) {
       await discovery.stopDiscovery();
     }
@@ -148,8 +160,8 @@ class TransportManager {
 
     // Cancel subscriptions
     await _incomingConnectionsSub?.cancel();
-    await _peersDiscoveredSub?.cancel();
-    await _peersLostSub?.cancel();
+    await _devicesDiscoveredSub?.cancel();
+    await _devicesLostSub?.cancel();
     await _peerStoreSub?.cancel();
 
     // Close stream controllers
@@ -157,6 +169,115 @@ class TransportManager {
     await _messageController.close();
     await _connectionRequestController.close();
     await _connectionResultController.close();
+    await _devicesDiscoveredController.close();
+    await _devicesLostController.close();
+  }
+
+  /// Attempt to connect to a device by address
+  Future<ConnectionAttemptResult> connectToDevice(DeviceAddress address) async {
+    if (!_isStarted || _isDisposed) {
+      return ConnectionAttemptResult(
+        peerId: PeerId('unknown'), // Will be determined after handshake
+        result: ConnectionResult.failed,
+        error: 'Transport manager not started',
+      );
+    }
+
+    // Check connection limits
+    if (_connections.length >= _config.maxConnections) {
+      return ConnectionAttemptResult(
+        peerId: PeerId('unknown'),
+        result: ConnectionResult.failed,
+        error: 'Maximum connections reached',
+      );
+    }
+
+    try {
+      // Establish transport connection
+      final transportConnection = await _config.protocol
+          .connect(address)
+          .timeout(_config.connectionTimeout);
+
+      if (transportConnection == null) {
+        return ConnectionAttemptResult(
+          peerId: PeerId('unknown'),
+          result: ConnectionResult.failed,
+          error: 'Transport connection failed',
+        );
+      }
+
+      // Perform handshake to discover peer ID
+      final handshakeResult = await _config.handshakeProtocol
+          .initiateHandshake(transportConnection, _config.localPeerId)
+          .timeout(_config.handshakeTimeout);
+
+      if (!handshakeResult.success || handshakeResult.remotePeerId == null) {
+        await transportConnection.close();
+        return ConnectionAttemptResult(
+          peerId: PeerId('unknown'),
+          result: ConnectionResult.failed,
+          error: handshakeResult.error ?? 'Handshake failed',
+        );
+      }
+
+      final remotePeerId = handshakeResult.remotePeerId!;
+
+      // Check if we already have a connection to this peer
+      if (_connections.containsKey(remotePeerId)) {
+        await transportConnection.close();
+        return ConnectionAttemptResult(
+          peerId: remotePeerId,
+          result: ConnectionResult.success,
+        );
+      }
+
+      // Create peer connection wrapper
+      final peerConnection = _PeerConnection(
+        peerId: remotePeerId,
+        connection: transportConnection,
+        onMessage: _handleMessage,
+        onDisconnect: () => _handlePeerDisconnected(remotePeerId),
+        localPeerId: _config.localPeerId,
+      );
+
+      _connections[remotePeerId] = peerConnection;
+
+      // Create or update peer record
+      final peer = Peer(
+        id: remotePeerId,
+        address: address,
+        status: PeerStatus.connected,
+        lastSeen: DateTime.now(),
+        metadata: handshakeResult.metadata,
+      );
+
+      await _updatePeer(peer);
+
+      final result = ConnectionAttemptResult(
+        peerId: remotePeerId,
+        result: ConnectionResult.success,
+        metadata: handshakeResult.metadata,
+      );
+
+      _connectionResultController.add(result);
+      return result;
+    } on TimeoutException {
+      final result = ConnectionAttemptResult(
+        peerId: PeerId('unknown'),
+        result: ConnectionResult.timeout,
+        error: 'Connection timeout',
+      );
+      _connectionResultController.add(result);
+      return result;
+    } catch (e) {
+      final result = ConnectionAttemptResult(
+        peerId: PeerId('unknown'),
+        result: ConnectionResult.failed,
+        error: e.toString(),
+      );
+      _connectionResultController.add(result);
+      return result;
+    }
   }
 
   /// Attempt to connect to a peer
@@ -392,15 +513,14 @@ class TransportManager {
     }
   }
 
-  /// Handle discovered peers
-  void _handlePeerDiscovered(Peer peer) {
-    _updatePeer(peer);
+  /// Handle discovered devices
+  void _handleDeviceDiscovered(DiscoveredDevice device) {
+    _devicesDiscoveredController.add(device);
   }
 
-  /// Handle lost peers
-  void _handlePeerLost(Peer peer) {
-    final updatedPeer = peer.copyWith(status: PeerStatus.disconnected);
-    _updatePeer(updatedPeer);
+  /// Handle lost devices
+  void _handleDeviceLost(DiscoveredDevice device) {
+    _devicesLostController.add(device);
   }
 
   /// Handle peer store events

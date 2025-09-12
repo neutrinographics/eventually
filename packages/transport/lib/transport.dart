@@ -37,7 +37,14 @@
 /// // Start the transport
 /// await transport.start();
 ///
-/// // Connect to a peer
+/// // Listen for discovered devices
+/// transport.devicesDiscovered.listen((device) {
+///   print('Found device: ${device.displayName}');
+///   // Connect to interesting devices
+///   transport.connectToDevice(device.address);
+/// });
+///
+/// // Or connect to a known peer
 /// final result = await transport.connectToPeer(PeerId('other-peer'));
 /// if (result.result == ConnectionResult.success) {
 ///   // Send a message

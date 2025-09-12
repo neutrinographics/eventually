@@ -1,5 +1,41 @@
 import 'dart:typed_data';
 
+/// Represents a discovered device on the network (before peer identification)
+class DiscoveredDevice {
+  const DiscoveredDevice({
+    required this.address,
+    required this.displayName,
+    required this.discoveredAt,
+    this.metadata = const {},
+  });
+
+  /// Network address where this device can be reached
+  final DeviceAddress address;
+
+  /// Human-readable name for this device (e.g., "John's iPhone")
+  final String displayName;
+
+  /// When this device was discovered
+  final DateTime discoveredAt;
+
+  /// Additional metadata about the device (e.g., capabilities, service info)
+  final Map<String, dynamic> metadata;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DiscoveredDevice &&
+          runtimeType == other.runtimeType &&
+          address == other.address &&
+          displayName == other.displayName;
+
+  @override
+  int get hashCode => Object.hash(address, displayName);
+
+  @override
+  String toString() => 'DiscoveredDevice($displayName at $address)';
+}
+
 /// Represents a unique identifier for a peer in the network.
 /// This is distinct from the device address and identifies the peer application.
 class PeerId {

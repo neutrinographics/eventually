@@ -196,33 +196,34 @@ class InMemoryPeerStore implements PeerStore {
   }
 }
 
-/// A simple broadcast-based peer discovery mechanism
-class BroadcastPeerDiscovery implements PeerDiscovery {
-  BroadcastPeerDiscovery({
-    required this.localPeerId,
+/// A simple broadcast-based device discovery mechanism
+class BroadcastDeviceDiscovery implements DeviceDiscovery {
+  BroadcastDeviceDiscovery({
+    required this.localDisplayName,
     required this.broadcastInterval,
-    this.peerTimeout = const Duration(minutes: 5),
+    this.deviceTimeout = const Duration(minutes: 5),
   });
 
-  final PeerId localPeerId;
+  final String localDisplayName;
   final Duration broadcastInterval;
-  final Duration peerTimeout;
+  final Duration deviceTimeout;
 
-  final Map<PeerId, _DiscoveredPeerInfo> _discoveredPeers = {};
-  final StreamController<Peer> _peersDiscoveredController =
-      StreamController<Peer>.broadcast();
-  final StreamController<Peer> _peersLostController =
-      StreamController<Peer>.broadcast();
+  final Map<DeviceAddress, _DiscoveredDeviceInfo> _discoveredDevices = {};
+  final StreamController<DiscoveredDevice> _devicesDiscoveredController =
+      StreamController<DiscoveredDevice>.broadcast();
+  final StreamController<DiscoveredDevice> _devicesLostController =
+      StreamController<DiscoveredDevice>.broadcast();
 
   Timer? _broadcastTimer;
   Timer? _cleanupTimer;
   bool _isDiscovering = false;
 
   @override
-  Stream<Peer> get peersDiscovered => _peersDiscoveredController.stream;
+  Stream<DiscoveredDevice> get devicesDiscovered =>
+      _devicesDiscoveredController.stream;
 
   @override
-  Stream<Peer> get peersLost => _peersLostController.stream;
+  Stream<DiscoveredDevice> get devicesLost => _devicesLostController.stream;
 
   @override
   bool get isDiscovering => _isDiscovering;
@@ -237,10 +238,10 @@ class BroadcastPeerDiscovery implements PeerDiscovery {
       _broadcastPresence();
     });
 
-    // Start cleanup timer to remove stale peers
+    // Start cleanup timer to remove stale devices
     _cleanupTimer = Timer.periodic(
-      Duration(seconds: peerTimeout.inSeconds ~/ 2),
-      (_) => _cleanupStalePeers(),
+      Duration(seconds: deviceTimeout.inSeconds ~/ 2),
+      (_) => _cleanupStaleDevices(),
     );
 
     // Initial broadcast
@@ -257,55 +258,60 @@ class BroadcastPeerDiscovery implements PeerDiscovery {
     _broadcastTimer = null;
     _cleanupTimer = null;
 
-    // Clear discovered peers
-    final peers = _discoveredPeers.values.map((info) => info.peer).toList();
-    _discoveredPeers.clear();
+    // Clear discovered devices
+    final devices = _discoveredDevices.values
+        .map((info) => info.device)
+        .toList();
+    _discoveredDevices.clear();
 
-    for (final peer in peers) {
-      _peersLostController.add(peer);
+    for (final device in devices) {
+      _devicesLostController.add(device);
     }
   }
 
-  /// Simulate receiving a broadcast message from a peer
+  /// Simulate receiving a broadcast message from a device
   /// In a real implementation, this would be called by the underlying
   /// transport when broadcast messages are received
   void simulateReceivedBroadcast({
-    required PeerId peerId,
     required DeviceAddress address,
+    required String displayName,
     Map<String, dynamic> metadata = const {},
   }) {
-    if (!_isDiscovering || peerId == localPeerId) return;
+    if (!_isDiscovering) return;
 
     final now = DateTime.now();
-    final existing = _discoveredPeers[peerId];
+    final existing = _discoveredDevices[address];
 
     if (existing == null) {
-      // New peer discovered
-      final peer = Peer(
-        id: peerId,
+      // New device discovered
+      final device = DiscoveredDevice(
         address: address,
-        status: PeerStatus.discovered,
+        displayName: displayName,
+        discoveredAt: now,
         metadata: metadata,
+      );
+
+      _discoveredDevices[address] = _DiscoveredDeviceInfo(
+        device: device,
         lastSeen: now,
       );
 
-      _discoveredPeers[peerId] = _DiscoveredPeerInfo(peer: peer, lastSeen: now);
-
-      _peersDiscoveredController.add(peer);
+      _devicesDiscoveredController.add(device);
     } else {
-      // Update existing peer
-      final updatedPeer = existing.peer.copyWith(
+      // Update existing device
+      final updatedDevice = DiscoveredDevice(
         address: address,
+        displayName: displayName,
+        discoveredAt: existing.device.discoveredAt,
         metadata: metadata,
+      );
+
+      _discoveredDevices[address] = _DiscoveredDeviceInfo(
+        device: updatedDevice,
         lastSeen: now,
       );
 
-      _discoveredPeers[peerId] = _DiscoveredPeerInfo(
-        peer: updatedPeer,
-        lastSeen: now,
-      );
-
-      _peersDiscoveredController.add(updatedPeer);
+      _devicesDiscoveredController.add(updatedDevice);
     }
   }
 
@@ -316,22 +322,22 @@ class BroadcastPeerDiscovery implements PeerDiscovery {
     // For example, UDP broadcast, mDNS, Bluetooth advertising, etc.
   }
 
-  /// Remove peers that haven't been seen recently
-  void _cleanupStalePeers() {
+  /// Remove devices that haven't been seen recently
+  void _cleanupStaleDevices() {
     final now = DateTime.now();
-    final staleThreshold = now.subtract(peerTimeout);
-    final stalePeers = <PeerId>[];
+    final staleThreshold = now.subtract(deviceTimeout);
+    final staleAddresses = <DeviceAddress>[];
 
-    for (final entry in _discoveredPeers.entries) {
+    for (final entry in _discoveredDevices.entries) {
       if (entry.value.lastSeen.isBefore(staleThreshold)) {
-        stalePeers.add(entry.key);
+        staleAddresses.add(entry.key);
       }
     }
 
-    for (final peerId in stalePeers) {
-      final info = _discoveredPeers.remove(peerId);
+    for (final address in staleAddresses) {
+      final info = _discoveredDevices.remove(address);
       if (info != null) {
-        _peersLostController.add(info.peer);
+        _devicesLostController.add(info.device);
       }
     }
   }
@@ -339,35 +345,15 @@ class BroadcastPeerDiscovery implements PeerDiscovery {
   /// Dispose of this discovery mechanism
   Future<void> dispose() async {
     await stopDiscovery();
-    await _peersDiscoveredController.close();
-    await _peersLostController.close();
+    await _devicesDiscoveredController.close();
+    await _devicesLostController.close();
   }
 }
 
-/// Internal class to track discovered peer information
-class _DiscoveredPeerInfo {
-  const _DiscoveredPeerInfo({required this.peer, required this.lastSeen});
+/// Internal class to track discovered device information
+class _DiscoveredDeviceInfo {
+  const _DiscoveredDeviceInfo({required this.device, required this.lastSeen});
 
-  final Peer peer;
+  final DiscoveredDevice device;
   final DateTime lastSeen;
-}
-
-/// A no-op peer discovery implementation
-class NoOpPeerDiscovery implements PeerDiscovery {
-  const NoOpPeerDiscovery();
-
-  @override
-  bool get isDiscovering => false;
-
-  @override
-  Stream<Peer> get peersDiscovered => const Stream.empty();
-
-  @override
-  Stream<Peer> get peersLost => const Stream.empty();
-
-  @override
-  Future<void> startDiscovery() async {}
-
-  @override
-  Future<void> stopDiscovery() async {}
 }

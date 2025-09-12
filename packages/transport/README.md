@@ -5,10 +5,10 @@ A generic transport library for handling peer-to-peer network connections with c
 ## Features
 
 - **Generic Transport Interface**: Pluggable transport protocols (TCP, WebSocket, Bluetooth, etc.)
-- **Peer Discovery & Management**: Automatic peer discovery with configurable mechanisms  
+- **Device Discovery & Management**: Automatic device discovery with configurable mechanisms  
 - **Connection Management**: Automatic connection handling with approval/rejection workflows
 - **Address vs Peer ID Distinction**: Separate device addresses from peer identities
-- **Live Updates**: Real-time streams for peer status changes and incoming messages
+- **Live Updates**: Real-time streams for device discovery, peer status changes and incoming messages
 - **Customizable Handshakes**: Default JSON handshake with option to implement custom protocols
 - **Persistent Peer Storage**: Optional peer information persistence
 - **Connection Limits**: Configurable maximum concurrent connections
@@ -38,6 +38,13 @@ final config = TransportConfig(
 
 final transport = TransportManager(config);
 
+// Listen for discovered devices
+transport.devicesDiscovered.listen((device) {
+  print('Found device: ${device.displayName} at ${device.address.value}');
+  // Connect to interesting devices
+  transport.connectToDevice(device.address);
+});
+
 // Listen for peer updates and messages
 transport.peerUpdates.listen((peer) {
   print('Peer ${peer.id.value} is now ${peer.status}');
@@ -48,16 +55,19 @@ transport.messagesReceived.listen((message) {
   print('Received: $text from ${message.senderId.value}');
 });
 
-// Start the transport
+// Start the transport (starts listening and device discovery)
 await transport.start();
 
-// Connect to a peer (after discovery)
-final result = await transport.connectToPeer(PeerId('other-peer'));
+// Connect to a device (peer ID discovered via handshake)
+final result = await transport.connectToDevice(DeviceAddress('device-addr'));
+// Or connect to a known peer
+// final result = await transport.connectToPeer(PeerId('known-peer'));
+
 if (result.result == ConnectionResult.success) {
   // Send a message
   final message = TransportMessage(
     senderId: config.localPeerId,
-    recipientId: PeerId('other-peer'),
+    recipientId: result.peerId,
     data: Uint8List.fromList('Hello!'.codeUnits),
     timestamp: DateTime.now(),
   );
@@ -75,15 +85,28 @@ The library maintains a clear distinction between:
 
 This allows the same peer to be reachable at different addresses over time.
 
+### Device Discovery vs Peer Management
+
+The library separates device discovery from peer management:
+
+**Device Discovery** (transport-level):
+- Finds devices on the network with their addresses and display names
+- No peer identity known yet (requires handshake)
+- Example: Nearby Connections finds endpoint IDs, Bluetooth finds MAC addresses
+
+**Peer Management** (application-level):
+- Manages known peers with verified identities
+- Created after successful connection and handshake
+- Tracks peer status, metadata, and connection state
+
 ### Peer Lifecycle
 
 Peers go through the following states:
-1. `discovered` - Found through discovery mechanism
-2. `connecting` - Connection attempt in progress  
-3. `connected` - Successfully connected and ready for messaging
-4. `disconnecting` - Connection being closed
-5. `disconnected` - No active connection
-6. `failed` - Connection attempt failed
+1. `connecting` - Connection attempt in progress  
+2. `connected` - Successfully connected and ready for messaging
+3. `disconnecting` - Connection being closed
+4. `disconnected` - No active connection
+5. `failed` - Connection attempt failed
 
 ### Connection Approval
 
@@ -124,15 +147,15 @@ abstract interface class HandshakeProtocol {
 }
 ```
 
-### PeerDiscovery
-Mechanism for finding peers on the network
+### DeviceDiscovery
+Mechanism for finding devices on the network (before peer identification)
 
 ```dart
-abstract interface class PeerDiscovery {
+abstract interface class DeviceDiscovery {
   Future<void> startDiscovery();
   Future<void> stopDiscovery();
-  Stream<Peer> get peersDiscovered;
-  Stream<Peer> get peersLost;
+  Stream<DiscoveredDevice> get devicesDiscovered;
+  Stream<DiscoveredDevice> get devicesLost;
 }
 ```
 
@@ -170,6 +193,20 @@ class MyTransportProtocol implements TransportProtocol {
   @override
   Stream<IncomingConnectionAttempt> get incomingConnections {
     // Return stream of incoming connection attempts
+  }
+
+  // ... implement other methods
+}
+
+class MyDeviceDiscovery implements DeviceDiscovery {
+  @override
+  Future<void> startDiscovery() async {
+    // Start discovering devices (e.g., broadcast, mDNS, Bluetooth scan)
+  }
+
+  @override
+  Stream<DiscoveredDevice> get devicesDiscovered {
+    // Return stream of discovered devices with addresses and display names
   }
 
   // ... implement other methods
@@ -226,7 +263,7 @@ final config = TransportConfig(
   protocol: myProtocol,
   handshakeProtocol: myHandshake,
   approvalHandler: myApprovalHandler,
-  peerDiscovery: myDiscovery,           // Optional
+  deviceDiscovery: myDeviceDiscovery,   // Optional
   peerStore: myStore,                   // Optional
   connectionTimeout: Duration(seconds: 30),
   handshakeTimeout: Duration(seconds: 10),
@@ -252,14 +289,14 @@ In-memory peer storage with live updates:
 final store = InMemoryPeerStore();
 ```
 
-### BroadcastPeerDiscovery
-Broadcast-based peer discovery:
+### BroadcastDeviceDiscovery
+Broadcast-based device discovery:
 
 ```dart
-final discovery = BroadcastPeerDiscovery(
-  localPeerId: PeerId('my-peer'),
+final discovery = BroadcastDeviceDiscovery(
+  localDisplayName: 'My Device',
   broadcastInterval: Duration(seconds: 5),
-  peerTimeout: Duration(minutes: 2),
+  deviceTimeout: Duration(minutes: 2),
 );
 ```
 
