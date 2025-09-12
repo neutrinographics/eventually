@@ -160,3 +160,20 @@ class IncomingBytes {
 
   IncomingBytes(this.peer, this.bytes, this.receivedAt);
 }
+
+/// Exception thrown when transport operations fail.
+class TransportException implements Exception {
+  const TransportException(this.message, {this.cause});
+
+  final String message;
+  final Object? cause;
+
+  @override
+  String toString() {
+    final buffer = StringBuffer('TransportException: $message');
+    if (cause != null) {
+      buffer.write(' (caused by: $cause)');
+    }
+    return buffer.toString();
+  }
+}
