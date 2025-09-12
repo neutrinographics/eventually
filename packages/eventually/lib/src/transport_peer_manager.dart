@@ -2,11 +2,9 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
 import 'package:eventually/src/block.dart';
-
 import 'cid.dart';
 import 'peer.dart';
 import 'peer_config.dart';
-import 'peer_handshake.dart';
 import 'protocol.dart';
 import 'transport.dart';
 
@@ -21,9 +19,6 @@ class TransportPeerManager implements PeerManager {
 
   /// Configuration for this peer manager.
   final PeerConfig config;
-
-  /// Handshake handler for peer identity discovery.
-  final PeerHandshake handshake;
 
   /// Default protocol for sync operations.
   final SyncProtocol syncProtocol;
@@ -48,10 +43,8 @@ class TransportPeerManager implements PeerManager {
   TransportPeerManager({
     required this.transport,
     required this.config,
-    PeerHandshake? handshake,
     SyncProtocol? syncProtocol,
-  }) : handshake = handshake ?? const DefaultPeerHandshake(),
-       syncProtocol = syncProtocol ?? BitSwapProtocol();
+  }) : syncProtocol = syncProtocol ?? BitSwapProtocol();
 
   /// Initializes the peer manager.
   Future<void> initialize() async {

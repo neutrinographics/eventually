@@ -14,7 +14,6 @@ export 'src/peer.dart';
 export 'src/peer_config.dart';
 export 'src/transport.dart';
 export 'src/transport_peer_manager.dart';
-export 'src/peer_handshake.dart' hide TransportPeerConnection;
 export 'src/protocol.dart';
 export 'src/hash.dart';
 export 'src/codec.dart' hide Codec;
