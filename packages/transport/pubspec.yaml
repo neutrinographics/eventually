@@ -1,0 +1,26 @@
+name: transport
+description: A generic transport library for handling peer-to-peer network connections with customizable protocols and handshakes
+version: 1.0.0
+homepage: https://github.com/neutrinographics/eventually
+repository: https://github.com/neutrinographics/eventually
+issue_tracker: https://github.com/neutrinographics/eventually/issues
+documentation: https://github.com/neutrinographics/eventually/tree/main/packages/transport
+
+environment:
+  sdk: ">=3.9.0 <4.0.0"
+
+resolution: workspace
+
+dependencies:
+  meta: ^1.12.0
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^4.0.0
+
+topics:
+  - networking
+  - peer-to-peer
+  - transport
+  - connections
+  - protocols

@@ -14,6 +14,7 @@ environment:
 
 workspace:
   - packages/eventually
+  - packages/transport
 
 # 🛠️ Dev dependencies used for managing the whole repository.
 dev_dependencies:

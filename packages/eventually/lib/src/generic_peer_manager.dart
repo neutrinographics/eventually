@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'cid.dart';
 import 'peer.dart';
@@ -23,8 +22,7 @@ class GenericPeerManager implements PeerManager {
 
   // Internal state
   final Map<PeerId, Peer> _peers = {};
-  @Deprecated('use _peers instead')
-  final Map<PeerId, GenericPeerConnection> _connections = {};
+
   final Map<TransportDeviceAddress, PeerId> _transportToPeerIdMap = {};
 
   final StreamController<PeerEvent> _peerEventsController =
@@ -56,16 +54,21 @@ class GenericPeerManager implements PeerManager {
       final peerId = _transportToPeerIdMap[incomingBytes.device.address];
       if (peerId != null) {
         final peer = _peers[peerId];
-        if (peer != null) {
-          final message = syncProtocol.decodeMessage(incomingBytes.bytes);
-          // TODO: parse the message and handle it accordingly
-          throw UnimplementedError("handleIncomingBytes is not implemented");
+        if (peer != null && peer.isActive) {
+          final message =
+              syncProtocol.decodeMessage(incomingBytes.bytes) as Message;
+          await _handleProtocolMessage(peer, message);
+        } else {
+          // Handle potential handshake from unconnected peer
+          await _handlePotentialHandshake(incomingBytes);
         }
-        // Ignore unknown peers
+      } else {
+        // Unknown device - might be initial contact
+        await _handlePotentialHandshake(incomingBytes);
       }
     } catch (e) {
       debugPrint(
-        'Failed to decode message from ${incomingBytes.device.address}: $e',
+        'Failed to process message from ${incomingBytes.device.address}: $e',
       );
     }
   }
@@ -77,14 +80,30 @@ class GenericPeerManager implements PeerManager {
   }) async {
     if (_isDisposed) throw Exception("PeerManager is disposed");
 
-    // check if a peer already exists.
-    final peerId = _transportToPeerIdMap[device.address];
-    if (peerId != null && _peers.containsKey(peerId)) {
-      return _peers[peerId]!;
+    // Check if a peer already exists
+    final existingPeerId = _transportToPeerIdMap[device.address];
+    if (existingPeerId != null && _peers.containsKey(existingPeerId)) {
+      return _peers[existingPeerId]!;
     }
 
-    throw UnimplementedError("perform handshake");
-    // TODO: use a completer and perform the handshake.
+    // Create a new peer with a deterministic ID
+    final peerId = PeerId('peer_${device.address.value.hashCode.abs()}');
+    final peer = Peer(
+      id: peerId,
+      transportPeer: device,
+      isActive: false, // Disconnected state initially
+    );
+
+    // Register the peer
+    _peers[peerId] = peer;
+    _transportToPeerIdMap[device.address] = peerId;
+
+    // Emit discovery event
+    _peerEventsController.add(
+      PeerDiscovered(peer: peer, timestamp: DateTime.now()),
+    );
+
+    return peer;
   }
 
   @override
@@ -93,30 +112,36 @@ class GenericPeerManager implements PeerManager {
       throw PeerException('Peer manager is disposed');
     }
 
-    Peer? peer = _peers[peerId.value];
+    final peer = _peers[peerId];
     if (peer == null) {
       throw PeerException('Unknown peer: $peerId');
     }
 
+    if (peer.isActive) {
+      return; // Already connected
+    }
+
+    // Update peer state to connected
     _peers[peerId] = peer.copyWith(isActive: true);
+
+    // Emit connection event
+    _peerEventsController.add(
+      PeerConnected(peer: _peers[peerId]!, timestamp: DateTime.now()),
+    );
   }
 
   @override
+  @Deprecated('Cannot directly access peer connections')
   PeerConnection? getConnection(PeerId peerId) {
-    return _connections[peerId];
+    // Connections are no longer exposed directly
+    return null;
   }
 
   @override
   Future<void> disconnect(PeerId peerId) async {
     if (_isDisposed) return;
 
-    final connection = _connections[peerId];
     final peer = _peers[peerId];
-
-    if (connection != null) {
-      await connection.close();
-      _connections.remove(peerId);
-    }
 
     if (peer?.transportPeer != null) {
       _transportToPeerIdMap.remove(peer!.transportPeer.address);
@@ -136,7 +161,6 @@ class GenericPeerManager implements PeerManager {
     if (_isDisposed) return;
 
     final peerIds = _peers.keys.toList();
-
     for (final peerId in peerIds) {
       await disconnect(peerId);
     }
@@ -149,10 +173,9 @@ class GenericPeerManager implements PeerManager {
     final peersWithBlock = <Peer>[];
 
     for (final peer in connectedPeers) {
-      final connection = _connections[peer.id];
-      if (connection != null && await connection.hasBlock(cid)) {
-        peersWithBlock.add(peer);
-      }
+      // For now, assume all connected peers might have any block
+      // In a full implementation, we'd track which blocks each peer has
+      peersWithBlock.add(peer);
     }
 
     return peersWithBlock;
@@ -164,18 +187,12 @@ class GenericPeerManager implements PeerManager {
 
     final broadcastFutures = <Future>[];
 
-    for (final connection in _connections.values) {
-      if (connection.isConnected) {
-        broadcastFutures.add(
-          connection
-              .sendMessage(message)
-              .catchError(
-                (e) => debugPrint(
-                  'Failed to broadcast to ${connection.peer?.id}: $e',
-                ),
-              ),
-        );
-      }
+    for (final peer in connectedPeers) {
+      broadcastFutures.add(
+        _sendMessageToPeer(peer, message).catchError(
+          (e) => debugPrint('Failed to broadcast to ${peer.id}: $e'),
+        ),
+      );
     }
 
     await Future.wait(broadcastFutures);
@@ -212,188 +229,65 @@ class GenericPeerManager implements PeerManager {
     await _peerEventsController.close();
     _transportToPeerIdMap.clear();
   }
-}
 
-/// Generic peer connection that uses a transport for network operations.
-class GenericPeerConnection implements PeerConnection {
-  /// The peer this connection is for.
-  final Peer _peer;
+  // Private helper methods
 
-  /// The transport layer for network communication.
-  final Transport transport;
-
-  /// The protocol for sync operations.
-  final SyncProtocol syncProtocol;
-
-  bool _isConnected = false;
-  bool _isDisposed = false;
-  final StreamController<Message> _messagesController =
-      StreamController<Message>.broadcast();
-
-  /// Creates a new generic peer connection.
-  GenericPeerConnection({
-    required Peer peer,
-    required this.transport,
-    required this.syncProtocol,
-  }) : _peer = peer;
-
-  @override
-  Peer? get peer => _peer;
-
-  @override
-  bool get isConnected => _isConnected && !_isDisposed;
-
-  @override
-  Stream<Message> get messages => _messagesController.stream;
-
-  /// Initializes the connection.
-  Future<void> initialize() async {
-    if (_isDisposed) {
-      throw PeerException('Connection is disposed');
+  Future<void> _handleProtocolMessage(Peer peer, Message message) async {
+    // Handle different message types based on sync protocol
+    switch (message.runtimeType) {
+      case Have:
+        await _handleHaveMessage(peer, message as Have);
+        break;
+      case Want:
+        await _handleWantMessage(peer, message as Want);
+        break;
+      case Block:
+        await _handleBlockMessage(peer, message as Block);
+        break;
+      default:
+        debugPrint('Unknown message type: ${message.runtimeType}');
     }
-
-    _isConnected = true;
   }
 
-  /// Handles incoming bytes from the transport.
-  void handleIncomingBytes(Uint8List bytes) {
-    if (_isDisposed || !_isConnected) return;
-
-    // Decode the message using the sync protocol
+  Future<void> _handlePotentialHandshake(IncomingBytes incomingBytes) async {
+    // For now, auto-register unknown devices as peers
+    // In a full implementation, this would handle handshake protocol
     try {
-      final message = syncProtocol.decodeMessage(bytes) as Message;
-      _handleMessage(message);
+      await registerDeviceAsPeer(incomingBytes.device);
     } catch (e) {
-      debugPrint('Failed to decode message from ${_peer.id}: $e');
+      debugPrint('Failed to register device: $e');
     }
   }
 
-  void _handleMessage(Message message) {
-    // Handle different message types
-    // This would typically update internal state and notify listeners
-    debugPrint('Received message from ${_peer.id}: ${message.runtimeType}');
-    _messagesController.add(message);
+  Future<void> _handleHaveMessage(Peer peer, Have message) async {
+    // Peer is announcing they have these blocks
+    // Could request blocks we need
   }
 
-  @override
-  Future<void> connect() async {
-    if (_isDisposed) {
-      throw PeerException('Connection is disposed');
-    }
-    _isConnected = true;
+  Future<void> _handleWantMessage(Peer peer, Want message) async {
+    // Peer is requesting these blocks
+    // Send blocks we have
   }
 
-  @override
-  Future<void> disconnect() async {
-    if (_isDisposed) return;
-    _isConnected = false;
-    _isDisposed = true;
-    await _messagesController.close();
+  Future<void> _handleBlockMessage(Peer peer, Block message) async {
+    // Peer sent us a block
+    // This would typically be handled by the synchronizer
   }
 
-  @override
-  Future<void> sendMessage(dynamic message) async {
-    if (_isDisposed || !_isConnected) {
-      throw PeerException('Connection not available');
-    }
+  Future<void> _sendMessageToPeer(Peer peer, Message message) async {
+    if (!peer.isActive) return;
 
     try {
-      final bytes = syncProtocol.encodeMessage(message);
-      await transport.sendBytes(_peer.transportPeer!, bytes);
+      final bytes = syncProtocol.encodeMessage(message as ProtocolMessage);
+      final outgoing = OutgoingBytes(peer.transportPeer, bytes);
+      _outgoingBytesController.add(outgoing);
     } catch (e) {
-      throw PeerException('Failed to send message to ${_peer.id}', cause: e);
+      throw PeerException('Failed to send message to ${peer.id}', cause: e);
     }
   }
 
-  @override
-  Future<Block?> requestBlock(CID cid) async {
-    if (!isConnected) return null;
-
-    try {
-      final request = Want(cids: {cid});
-      await sendMessage(request);
-
-      // This is a simplified implementation
-      // In practice, you'd wait for the response and handle timeouts
-      return null;
-    } catch (e) {
-      return null;
-    }
+  /// Debug print function for development.
+  void debugPrint(String message) {
+    print('[GenericPeerManager] $message');
   }
-
-  @override
-  Future<List<Block>> requestBlocks(List<CID> cids) async {
-    if (!isConnected) return [];
-
-    try {
-      final request = Want(cids: cids.toSet());
-      await sendMessage(request);
-
-      // This is a simplified implementation
-      // In practice, you'd wait for the response and handle timeouts
-      return [];
-    } catch (e) {
-      return [];
-    }
-  }
-
-  @override
-  Future<void> sendBlock(Block block) async {
-    if (!isConnected) return;
-
-    try {
-      final message = Have(cids: {block.cid});
-      await sendMessage(message);
-    } catch (e) {
-      // Ignore send errors for now
-    }
-  }
-
-  @override
-  Future<bool> hasBlock(CID cid) async {
-    if (!isConnected) return false;
-
-    try {
-      // This would typically send a query message and wait for response
-      // Simplified implementation
-      return false;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  @override
-  Future<Set<String>> getCapabilities() async {
-    if (!isConnected) return {};
-
-    // This would typically exchange capability information during handshake
-    // Simplified implementation
-    return {'bitswap'};
-  }
-
-  @override
-  Future<Duration> ping() async {
-    if (!isConnected) throw PeerException('Not connected');
-
-    try {
-      // This would typically send a ping message and wait for pong
-      // Simplified implementation - just return a mock latency
-      return Duration(milliseconds: 50);
-    } catch (e) {
-      throw PeerException('Ping failed', cause: e);
-    }
-  }
-
-  Future<void> close() async {
-    if (_isDisposed) return;
-
-    _isConnected = false;
-    _isDisposed = true;
-    await _messagesController.close();
-  }
-}
-
-/// Debug print function for development.
-void debugPrint(String message) {
-  print('[GenericPeerManager] $message');
 }

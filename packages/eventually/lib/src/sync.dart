@@ -182,7 +182,7 @@ class DefaultSynchronizer implements Synchronizer {
           timeout: _config.handshakeTimeout,
         );
         if (_config.autoConnect &&
-            _peerManager.connectedPeers.length <= _config.maxConnections) {
+            _peerManager.connectedPeers.length < _config.maxConnections) {
           await _peerManager.connectToPeer(peer.id);
         }
       }
@@ -209,15 +209,17 @@ class DefaultSynchronizer implements Synchronizer {
 
   @override
   Future<void> connectToPeer(PeerId peerId) async {
-    if (!_isStarted) return;
+    if (!_isStarted) {
+      throw SyncException('Synchronizer not started');
+    }
     await _peerManager.connectToPeer(peerId);
   }
 
   Future<SyncResult> _syncWithPeer(Peer peer, {Set<CID>? roots}) async {
     final startTime = DateTime.now();
-    final connection = _peerManager.getConnection(peer.id);
-    if (connection == null) {
-      throw SyncException('No connection found for peer: ${peer.id}');
+
+    if (!peer.isActive) {
+      throw SyncException('Peer not connected: ${peer.id}');
     }
 
     try {
@@ -229,23 +231,28 @@ class DefaultSynchronizer implements Synchronizer {
       // Find what blocks we need
       final missingBlocks = <CID>{};
       for (final root in syncRoots) {
-        final missing = await _findMissingBlocks(connection, root);
+        final missing = await _findMissingBlocks(peer, root);
         missingBlocks.addAll(missing);
       }
 
       // Request missing blocks
       final fetchedBlocks = <Block>[];
       for (final cid in missingBlocks) {
-        final block = await connection.requestBlock(cid);
-        if (block != null) {
-          await _store.put(block);
-          _dag.addBlock(block);
-          fetchedBlocks.add(block);
+        try {
+          final block = await _requestBlockFromPeer(peer, cid);
+          if (block != null) {
+            await _store.put(block);
+            _dag.addBlock(block);
+            fetchedBlocks.add(block);
+          }
+        } catch (e) {
+          // Continue with other blocks if one fails
+          continue;
         }
       }
 
       // Send blocks that the peer is missing
-      final sentBlocks = await _sendMissingBlocksToPeer(connection, syncRoots);
+      final sentBlocks = await _sendMissingBlocksToPeer(peer, syncRoots);
 
       final duration = DateTime.now().difference(startTime);
       final result = SyncResult(
@@ -370,13 +377,15 @@ class DefaultSynchronizer implements Synchronizer {
 
   @override
   Future<void> stop() async {
-    _stopContinuousSync();
+    if (!_isStarted) return;
 
-    // Stop discovery
+    // Stop timers
+    _continuousSyncTimer?.cancel();
+    _continuousSyncTimer = null;
     _discoveryTimer?.cancel();
     _discoveryTimer = null;
 
-    // Cancel incoming bytes subscription
+    // Cancel stream subscriptions
     await _incomingBytesSubscription?.cancel();
     _incomingBytesSubscription = null;
 
@@ -395,10 +404,21 @@ class DefaultSynchronizer implements Synchronizer {
 
   // Private helper methods
 
-  Future<Set<CID>> _findMissingBlocks(
-    PeerConnection connection,
-    CID root,
-  ) async {
+  Future<Block?> _requestBlockFromPeer(Peer peer, CID cid) async {
+    // Send Want message to peer requesting the block
+    final wantMessage = Want(cids: {cid});
+    await _peerManager.broadcast(wantMessage); // For now, broadcast to all
+
+    // In a full implementation, this would:
+    // 1. Send Want message specifically to this peer
+    // 2. Wait for Block response with timeout
+    // 3. Return the received block
+
+    // For now, return null (block not available)
+    return null;
+  }
+
+  Future<Set<CID>> _findMissingBlocks(Peer peer, CID root) async {
     final missing = <CID>{};
     final visited = <String>{};
 
@@ -407,10 +427,9 @@ class DefaultSynchronizer implements Synchronizer {
       visited.add(cid.toString());
 
       if (!await _store.has(cid)) {
-        // Check if peer has this block
-        if (await connection.hasBlock(cid)) {
-          missing.add(cid);
-        }
+        // Assume peer might have this block
+        // In a full implementation, we'd check peer's advertised blocks
+        missing.add(cid);
         return false;
       }
       return true;
@@ -420,13 +439,16 @@ class DefaultSynchronizer implements Synchronizer {
   }
 
   Future<List<Block>> _sendMissingBlocksToPeer(
-    PeerConnection connection,
+    Peer peer,
     Set<CID> roots,
   ) async {
     final sentBlocks = <Block>[];
 
     // This is a simplified implementation
-    // In practice, you'd want to negotiate what the peer needs
+    // In practice, you'd want to:
+    // 1. Check what blocks the peer is missing (via Want messages)
+    // 2. Send Have messages for blocks we have
+    // 3. Send Block messages when peer requests them
 
     return sentBlocks;
   }

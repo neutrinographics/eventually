@@ -139,26 +139,25 @@ class ChatNearbyTransport implements Transport {
 
   @override
   Future<void> sendBytes(
-    TransportDevice peer,
-    Uint8List bytes, {
+    OutgoingBytes outgoingBytes, {
     Duration? timeout,
   }) async {
     if (!_isInitialized) {
       throw const TransportException('Transport not initialized');
     }
 
-    final connectedPeer = _connectedPeers[peer.address.value];
+    final endpointId = outgoingBytes.device.address.value;
+    final connectedPeer = _connectedPeers[endpointId];
     if (connectedPeer == null) {
-      throw TransportException('Not connected to peer: ${peer.displayName}');
+      throw TransportException(
+        'Not connected to peer: ${outgoingBytes.device.displayName}',
+      );
     }
 
     try {
-      await Nearby().sendBytesPayload(peer.address.value, bytes);
+      await Nearby().sendBytesPayload(endpointId, outgoingBytes.bytes);
     } catch (e) {
-      throw TransportException(
-        'Failed to send message to ${peer.displayName}',
-        cause: e,
-      );
+      throw TransportException('Failed to send bytes to peer', cause: e);
     }
   }
 
