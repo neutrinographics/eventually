@@ -13,7 +13,6 @@ import 'transport.dart';
 /// This class manages the lifecycle of peer connections, including discovery,
 /// handshake, protocol negotiation, and message routing between the transport
 /// layer and application layer.
-/// TODO: Is this a duplicate of transport?
 class TransportPeerManager implements PeerManager {
   /// The transport layer for network communication.
   final Transport transport;
