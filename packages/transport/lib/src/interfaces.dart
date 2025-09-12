@@ -5,7 +5,7 @@ import 'models.dart';
 import 'default_implementations.dart';
 
 /// Abstract interface for low-level transport protocols (e.g., TCP, WebSocket, Bluetooth)
-/// Includes both connection management and device discovery capabilities
+/// Includes connection management, device discovery, and direct data transmission
 abstract interface class TransportProtocol {
   /// Start listening for incoming connections
   Future<void> startListening();
@@ -19,11 +19,15 @@ abstract interface class TransportProtocol {
   /// Stop discovering devices on the network
   Future<void> stopDiscovery();
 
-  /// Attempt to connect to a peer at the given address
-  Future<TransportConnection?> connect(DeviceAddress address);
+  /// Send data directly to a device address
+  /// Returns true if the data was sent successfully, false otherwise
+  Future<bool> sendToAddress(DeviceAddress address, Uint8List data);
 
-  /// Stream of incoming connection attempts
-  Stream<IncomingConnectionAttempt> get incomingConnections;
+  /// Stream of incoming data with sender address information
+  Stream<IncomingData> get incomingData;
+
+  /// Stream of connection events (connected/disconnected from addresses)
+  Stream<ConnectionEvent> get connectionEvents;
 
   /// Stream of newly discovered devices
   Stream<DiscoveredDevice> get devicesDiscovered;
@@ -38,53 +42,68 @@ abstract interface class TransportProtocol {
   bool get isDiscovering;
 }
 
-/// Represents an incoming connection attempt from a remote peer
-class IncomingConnectionAttempt {
-  const IncomingConnectionAttempt({
-    required this.connection,
-    // TODO: the address here is redundant because connection already has an address.
-    required this.address,
+/// Represents incoming data from a remote peer
+class IncomingData {
+  const IncomingData({
+    required this.data,
+    required this.fromAddress,
+    required this.timestamp,
   });
 
-  /// The connection that was established
-  final TransportConnection connection;
+  /// The raw data received
+  final Uint8List data;
 
-  /// The address the connection came from
-  final DeviceAddress address;
+  /// The address the data came from
+  final DeviceAddress fromAddress;
+
+  /// When the data was received
+  final DateTime timestamp;
 }
 
-/// Abstract interface for a low-level transport connection
-abstract interface class TransportConnection {
-  /// Send raw data over this connection
-  Future<void> send(Uint8List data);
+/// Represents a connection event (connect/disconnect)
+class ConnectionEvent {
+  const ConnectionEvent({
+    required this.address,
+    required this.type,
+    required this.timestamp,
+  });
 
-  /// Close this connection
-  Future<void> close();
+  /// The address involved in the connection event
+  final DeviceAddress address;
 
-  /// Stream of raw data received over this connection
-  Stream<Uint8List> get dataReceived;
+  /// The type of connection event
+  final ConnectionEventType type;
 
-  /// Stream that emits when the connection is closed
-  Stream<void> get connectionClosed;
+  /// When the event occurred
+  final DateTime timestamp;
+}
 
-  /// Whether this connection is currently open
-  bool get isOpen;
+/// Types of connection events
+enum ConnectionEventType {
+  /// A connection to this address was established
+  connected,
 
-  /// The remote address of this connection
-  DeviceAddress get remoteAddress;
+  /// A connection to this address was lost
+  disconnected,
 }
 
 /// Abstract interface for handling the handshake process between peers
 abstract interface class HandshakeProtocol {
   /// Perform a handshake as the initiator of the connection
-  Future<HandshakeResult> initiateHandshake(
-    TransportConnection connection,
+  /// Returns handshake data to send to the remote peer
+  Future<Uint8List> initiateHandshake(PeerId localPeerId);
+
+  /// Handle incoming handshake data and return response data
+  Future<HandshakeResult> handleIncomingHandshake(
+    Uint8List handshakeData,
+    DeviceAddress fromAddress,
     PeerId localPeerId,
   );
 
-  /// Handle an incoming handshake as the responder
-  Future<HandshakeResult> respondToHandshake(
-    TransportConnection connection,
+  /// Process handshake response data
+  Future<HandshakeResult> processHandshakeResponse(
+    Uint8List responseData,
+    DeviceAddress fromAddress,
     PeerId localPeerId,
   );
 }
@@ -156,28 +175,6 @@ class ManualApprovalHandler implements ConnectionApprovalHandler {
   ) {
     return approvalCallback(request);
   }
-}
-
-/// Legacy interface - device discovery is now part of TransportProtocol
-/// This interface is kept for backward compatibility and will be removed in a future version
-@Deprecated(
-  'Use TransportProtocol.startDiscovery/stopDiscovery and related methods instead',
-)
-abstract interface class DeviceDiscovery {
-  /// Start discovering devices
-  Future<void> startDiscovery();
-
-  /// Stop discovering devices
-  Future<void> stopDiscovery();
-
-  /// Stream of newly discovered devices
-  Stream<DiscoveredDevice> get devicesDiscovered;
-
-  /// Stream of devices that are no longer available
-  Stream<DeviceAddress> get devicesLost;
-
-  /// Whether discovery is currently active
-  bool get isDiscovering;
 }
 
 /// Interface for storing and retrieving peer information
@@ -257,26 +254,6 @@ class PolicyBasedConnectionPolicy implements ConnectionPolicy {
   }
 }
 
-/// A no-op device discovery implementation
-class NoOpDeviceDiscovery implements DeviceDiscovery {
-  const NoOpDeviceDiscovery();
-
-  @override
-  bool get isDiscovering => false;
-
-  @override
-  Stream<DiscoveredDevice> get devicesDiscovered => const Stream.empty();
-
-  @override
-  Stream<DeviceAddress> get devicesLost => const Stream.empty();
-
-  @override
-  Future<void> startDiscovery() async {}
-
-  @override
-  Future<void> stopDiscovery() async {}
-}
-
 /// Configuration for the transport manager
 class TransportConfig {
   const TransportConfig({
@@ -284,13 +261,9 @@ class TransportConfig {
     required this.protocol,
     this.handshakeProtocol = const JsonHandshakeProtocol(),
     this.approvalHandler = const AutoApprovalHandler(),
-    @Deprecated('Device discovery is now handled by TransportProtocol')
-    this.deviceDiscovery,
     this.connectionPolicy,
     this.peerStore,
-    this.connectionTimeout = const Duration(seconds: 30),
     this.handshakeTimeout = const Duration(seconds: 10),
-    this.maxConnections = 100,
   });
 
   /// The local peer ID
@@ -305,22 +278,12 @@ class TransportConfig {
   /// Handler for connection approval (defaults to AutoApprovalHandler)
   final ConnectionApprovalHandler approvalHandler;
 
-  /// Optional device discovery mechanism (deprecated - now part of TransportProtocol)
-  @Deprecated('Device discovery is now handled by TransportProtocol')
-  final DeviceDiscovery? deviceDiscovery;
-
   /// Optional policy for deciding which discovered devices to connect to
   final ConnectionPolicy? connectionPolicy;
 
   /// Optional peer store for persistence
   final PeerStore? peerStore;
 
-  /// Timeout for connection attempts
-  final Duration connectionTimeout;
-
   /// Timeout for handshake operations
   final Duration handshakeTimeout;
-
-  /// Maximum number of concurrent connections
-  final int maxConnections;
 }

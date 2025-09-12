@@ -57,4 +57,5 @@ library transport;
 export 'src/models.dart';
 export 'src/interfaces.dart';
 export 'src/transport_manager.dart';
+
 export 'src/default_implementations.dart';

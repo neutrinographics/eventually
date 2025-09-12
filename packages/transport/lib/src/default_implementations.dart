@@ -5,46 +5,87 @@ import 'dart:typed_data';
 import 'interfaces.dart';
 import 'models.dart';
 
-/// A simple JSON-based handshake protocol
+/// A simple JSON-based handshake protocol for the new direct transmission model
 class JsonHandshakeProtocol implements HandshakeProtocol {
-  const JsonHandshakeProtocol({this.timeout = const Duration(seconds: 10)});
-
-  final Duration timeout;
+  const JsonHandshakeProtocol();
 
   @override
-  Future<HandshakeResult> initiateHandshake(
-    TransportConnection connection,
+  Future<Uint8List> initiateHandshake(PeerId localPeerId) async {
+    // Create handshake initiation data
+    final handshakeData = {
+      'type': 'handshake_init',
+      'peer_id': localPeerId.value,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+      'version': '1.0.0',
+    };
+
+    final jsonBytes = utf8.encode(json.encode(handshakeData));
+    return Uint8List.fromList(jsonBytes);
+  }
+
+  @override
+  Future<HandshakeResult> handleIncomingHandshake(
+    Uint8List handshakeData,
+    DeviceAddress fromAddress,
     PeerId localPeerId,
   ) async {
     try {
-      // Send handshake initiation
-      final handshakeData = {
-        'type': 'handshake_init',
+      final jsonString = utf8.decode(handshakeData);
+      final request = json.decode(jsonString) as Map<String, dynamic>;
+
+      // Validate request
+      if (request['type'] != 'handshake_init') {
+        return const HandshakeResult(
+          success: false,
+          remotePeerId: null,
+          error: 'Invalid handshake request type',
+        );
+      }
+
+      final remotePeerIdValue = request['peer_id'] as String?;
+      if (remotePeerIdValue == null) {
+        return const HandshakeResult(
+          success: false,
+          remotePeerId: null,
+          error: 'Remote peer ID not provided in handshake',
+        );
+      }
+
+      final remotePeerId = PeerId(remotePeerIdValue);
+
+      // Create handshake response data
+      final responseData = {
+        'type': 'handshake_response',
         'peer_id': localPeerId.value,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
         'version': '1.0.0',
       };
 
-      final jsonBytes = utf8.encode(json.encode(handshakeData));
-      await connection.send(Uint8List.fromList(jsonBytes));
+      final responseBytes = utf8.encode(json.encode(responseData));
 
-      // Wait for response
-      final responseCompleter = Completer<Map<String, dynamic>>();
-      late StreamSubscription<Uint8List> subscription;
+      return HandshakeResult(
+        success: true,
+        remotePeerId: remotePeerId,
+        metadata: {'response_data': Uint8List.fromList(responseBytes)},
+      );
+    } catch (e) {
+      return HandshakeResult(
+        success: false,
+        remotePeerId: null,
+        error: 'Failed to process handshake: $e',
+      );
+    }
+  }
 
-      subscription = connection.dataReceived.listen((data) {
-        try {
-          final jsonString = utf8.decode(data);
-          final response = json.decode(jsonString) as Map<String, dynamic>;
-          subscription.cancel();
-          responseCompleter.complete(response);
-        } catch (e) {
-          subscription.cancel();
-          responseCompleter.completeError(e);
-        }
-      });
-
-      final response = await responseCompleter.future.timeout(timeout);
+  @override
+  Future<HandshakeResult> processHandshakeResponse(
+    Uint8List responseData,
+    DeviceAddress fromAddress,
+    PeerId localPeerId,
+  ) async {
+    try {
+      final jsonString = utf8.decode(responseData);
+      final response = json.decode(jsonString) as Map<String, dynamic>;
 
       // Validate response
       if (response['type'] != 'handshake_response') {
@@ -55,95 +96,24 @@ class JsonHandshakeProtocol implements HandshakeProtocol {
         );
       }
 
-      final remotePeerIdString = response['peer_id'] as String?;
-      if (remotePeerIdString == null) {
+      final remotePeerIdValue = response['peer_id'] as String?;
+      if (remotePeerIdValue == null) {
         return const HandshakeResult(
           success: false,
           remotePeerId: null,
-          error: 'Missing peer ID in handshake response',
+          error: 'Remote peer ID not provided in response',
         );
       }
 
       return HandshakeResult(
         success: true,
-        remotePeerId: PeerId(remotePeerIdString),
-        metadata: {
-          'version': response['version'],
-          'timestamp': response['timestamp'],
-        },
+        remotePeerId: PeerId(remotePeerIdValue),
       );
     } catch (e) {
       return HandshakeResult(
         success: false,
         remotePeerId: null,
-        error: e.toString(),
-      );
-    }
-  }
-
-  @override
-  Future<HandshakeResult> respondToHandshake(
-    TransportConnection connection,
-    PeerId localPeerId,
-  ) async {
-    try {
-      // Wait for handshake initiation
-      final initCompleter = Completer<Map<String, dynamic>>();
-      late StreamSubscription<Uint8List> subscription;
-
-      subscription = connection.dataReceived.listen((data) {
-        try {
-          final jsonString = utf8.decode(data);
-          final init = json.decode(jsonString) as Map<String, dynamic>;
-          subscription.cancel();
-          initCompleter.complete(init);
-        } catch (e) {
-          subscription.cancel();
-          initCompleter.completeError(e);
-        }
-      });
-
-      final init = await initCompleter.future.timeout(timeout);
-
-      // Validate initiation
-      if (init['type'] != 'handshake_init') {
-        return const HandshakeResult(
-          success: false,
-          remotePeerId: null,
-          error: 'Invalid handshake initiation type',
-        );
-      }
-
-      final remotePeerIdString = init['peer_id'] as String?;
-      if (remotePeerIdString == null) {
-        return const HandshakeResult(
-          success: false,
-          remotePeerId: null,
-          error: 'Missing peer ID in handshake initiation',
-        );
-      }
-
-      // Send response
-      final responseData = {
-        'type': 'handshake_response',
-        'peer_id': localPeerId.value,
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-        'version': '1.0.0',
-      };
-
-      final jsonBytes = utf8.encode(json.encode(responseData));
-      await connection.send(Uint8List.fromList(jsonBytes));
-
-      return HandshakeResult(
-        success: true,
-        remotePeerId: PeerId(remotePeerIdString),
-        metadata: {'version': init['version'], 'timestamp': init['timestamp']},
-      );
-    } catch (e) {
-      return HandshakeResult(
-        success: false,
-        remotePeerId: null,
-        error: e.toString(),
+        error: 'Failed to process handshake response: $e',
       );
     }
   }
@@ -197,163 +167,3 @@ class InMemoryPeerStore implements PeerStore {
 }
 
 /// A simple broadcast-based device discovery mechanism
-class BroadcastDeviceDiscovery implements DeviceDiscovery {
-  BroadcastDeviceDiscovery({
-    required this.localDisplayName,
-    required this.broadcastInterval,
-    this.deviceTimeout = const Duration(minutes: 5),
-  });
-
-  final String localDisplayName;
-  final Duration broadcastInterval;
-  final Duration deviceTimeout;
-
-  final Map<DeviceAddress, _DiscoveredDeviceInfo> _discoveredDevices = {};
-  final StreamController<DiscoveredDevice> _devicesDiscoveredController =
-      StreamController<DiscoveredDevice>.broadcast();
-  final StreamController<DeviceAddress> _devicesLostController =
-      StreamController<DeviceAddress>.broadcast();
-
-  Timer? _broadcastTimer;
-  Timer? _cleanupTimer;
-  bool _isDiscovering = false;
-
-  @override
-  Stream<DiscoveredDevice> get devicesDiscovered =>
-      _devicesDiscoveredController.stream;
-
-  @override
-  Stream<DeviceAddress> get devicesLost => _devicesLostController.stream;
-
-  @override
-  bool get isDiscovering => _isDiscovering;
-
-  @override
-  Future<void> startDiscovery() async {
-    if (_isDiscovering) return;
-    _isDiscovering = true;
-
-    // Start broadcasting our presence
-    _broadcastTimer = Timer.periodic(broadcastInterval, (_) {
-      _broadcastPresence();
-    });
-
-    // Start cleanup timer to remove stale devices
-    _cleanupTimer = Timer.periodic(
-      Duration(seconds: deviceTimeout.inSeconds ~/ 2),
-      (_) => _cleanupStaleDevices(),
-    );
-
-    // Initial broadcast
-    _broadcastPresence();
-  }
-
-  @override
-  Future<void> stopDiscovery() async {
-    if (!_isDiscovering) return;
-    _isDiscovering = false;
-
-    _broadcastTimer?.cancel();
-    _cleanupTimer?.cancel();
-    _broadcastTimer = null;
-    _cleanupTimer = null;
-
-    // Clear discovered devices
-    final devices = _discoveredDevices.values
-        .map((info) => info.device)
-        .toList();
-    _discoveredDevices.clear();
-
-    for (final device in devices) {
-      _devicesLostController.add(device.address);
-    }
-  }
-
-  /// Simulate receiving a broadcast message from a device
-  /// In a real implementation, this would be called by the underlying
-  /// transport when broadcast messages are received
-  void simulateReceivedBroadcast({
-    required DeviceAddress address,
-    required String displayName,
-    Map<String, dynamic> metadata = const {},
-  }) {
-    if (!_isDiscovering) return;
-
-    final now = DateTime.now();
-    final existing = _discoveredDevices[address];
-
-    if (existing == null) {
-      // New device discovered
-      final device = DiscoveredDevice(
-        address: address,
-        displayName: displayName,
-        discoveredAt: now,
-        metadata: metadata,
-      );
-
-      _discoveredDevices[address] = _DiscoveredDeviceInfo(
-        device: device,
-        lastSeen: now,
-      );
-
-      _devicesDiscoveredController.add(device);
-    } else {
-      // Update existing device
-      final updatedDevice = DiscoveredDevice(
-        address: address,
-        displayName: displayName,
-        discoveredAt: existing.device.discoveredAt,
-        metadata: metadata,
-      );
-
-      _discoveredDevices[address] = _DiscoveredDeviceInfo(
-        device: updatedDevice,
-        lastSeen: now,
-      );
-
-      _devicesDiscoveredController.add(updatedDevice);
-    }
-  }
-
-  /// Broadcast our presence (would be implemented by concrete transport)
-  void _broadcastPresence() {
-    // This is a placeholder - in a real implementation, this would
-    // use the underlying transport to broadcast presence information
-    // For example, UDP broadcast, mDNS, Bluetooth advertising, etc.
-  }
-
-  /// Remove devices that haven't been seen recently
-  void _cleanupStaleDevices() {
-    final now = DateTime.now();
-    final staleThreshold = now.subtract(deviceTimeout);
-    final staleAddresses = <DeviceAddress>[];
-
-    for (final entry in _discoveredDevices.entries) {
-      if (entry.value.lastSeen.isBefore(staleThreshold)) {
-        staleAddresses.add(entry.key);
-      }
-    }
-
-    for (final address in staleAddresses) {
-      final info = _discoveredDevices.remove(address);
-      if (info != null) {
-        _devicesLostController.add(info.device.address);
-      }
-    }
-  }
-
-  /// Dispose of this discovery mechanism
-  Future<void> dispose() async {
-    await stopDiscovery();
-    await _devicesDiscoveredController.close();
-    await _devicesLostController.close();
-  }
-}
-
-/// Internal class to track discovered device information
-class _DiscoveredDeviceInfo {
-  const _DiscoveredDeviceInfo({required this.device, required this.lastSeen});
-
-  final DiscoveredDevice device;
-  final DateTime lastSeen;
-}
