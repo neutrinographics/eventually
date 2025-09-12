@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/chat_peer.dart';
-import '../services/eventually_chat_service.dart';
+import '../services/chat_service.dart';
 
 class PeerListDrawer extends StatelessWidget {
   const PeerListDrawer({super.key});
@@ -32,7 +32,7 @@ class PeerListDrawer extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: Consumer<EventuallyChatService>(
+            child: Consumer<ChatService>(
               builder: (context, chatService, child) {
                 if (chatService.peers.isEmpty) {
                   return const Center(
@@ -120,7 +120,7 @@ class PeerListDrawer extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         itemCount: chatService.peers.length,
                         itemBuilder: (context, index) {
-                          final peer = chatService.peers[index];
+                          final peer = chatService.peers.elementAt(index);
                           return PeerTile(peer: peer);
                         },
                       ),
@@ -136,7 +136,7 @@ class PeerListDrawer extends StatelessWidget {
             decoration: BoxDecoration(
               border: Border(top: BorderSide(color: Colors.grey.shade300)),
             ),
-            child: Consumer<EventuallyChatService>(
+            child: Consumer<ChatService>(
               builder: (context, chatService, child) {
                 return Row(
                   children: [
@@ -149,7 +149,7 @@ class PeerListDrawer extends StatelessWidget {
                       ),
                       child: Center(
                         child: Text(
-                          _getInitials(chatService.userName ?? ''),
+                          _getInitials(chatService.userName ?? 'Unknown'),
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 16,

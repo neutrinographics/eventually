@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
-import 'package:meta/meta.dart';
+import 'package:eventually/src/block.dart';
+
 import 'cid.dart';
 import 'peer.dart';
 import 'peer_config.dart';
@@ -9,12 +10,12 @@ import 'peer_handshake.dart';
 import 'protocol.dart';
 import 'transport.dart';
 
-/// Modern peer manager implementation using the new Transport interface.
+/// Peer manager implementation using the Transport interface.
 ///
 /// This class manages the lifecycle of peer connections, including discovery,
 /// handshake, protocol negotiation, and message routing between the transport
 /// layer and application layer.
-class ModernTransportPeerManager implements PeerManager {
+class TransportPeerManager implements PeerManager {
   /// The transport layer for network communication.
   final Transport transport;
 
@@ -29,7 +30,7 @@ class ModernTransportPeerManager implements PeerManager {
 
   // Internal state
   final Map<PeerId, Peer> _peers = {};
-  final Map<PeerId, ModernPeerConnection> _connections = {};
+  final Map<PeerId, TransportPeerConnection> _connections = {};
   final Map<String, TransportPeer> _discoveredTransportPeers = {};
   final Map<String, PeerId?> _transportToPeerIdMap = {};
   final Map<PeerId, String> _peerIdToTransportMap = {};
@@ -43,8 +44,8 @@ class ModernTransportPeerManager implements PeerManager {
   bool _isInitialized = false;
   bool _isDiscoveryActive = false;
 
-  /// Creates a new modern transport-based peer manager.
-  ModernTransportPeerManager({
+  /// Creates a new transport-based peer manager.
+  TransportPeerManager({
     required this.transport,
     required this.config,
     PeerHandshake? handshake,
@@ -104,7 +105,8 @@ class ModernTransportPeerManager implements PeerManager {
 
     try {
       await _performDiscovery();
-      _emitPeerEvent(PeerDiscoveryStarted(timestamp: DateTime.now()));
+      // TODO: do we really ned this event?
+      // _emitPeerEvent(PeerDiscoveryStarted(timestamp: DateTime.now()));
     } catch (e) {
       debugPrint('❌ Failed to start discovery: $e');
       _isDiscoveryActive = false;
@@ -119,7 +121,8 @@ class ModernTransportPeerManager implements PeerManager {
     _isDiscoveryActive = false;
     debugPrint('🛑 Stopping peer discovery');
 
-    _emitPeerEvent(PeerDiscoveryStopped(timestamp: DateTime.now()));
+    // TODO: do we really need this event?
+    // _emitPeerEvent(PeerDiscoveryStopped(timestamp: DateTime.now()));
   }
 
   @override
@@ -267,7 +270,7 @@ class ModernTransportPeerManager implements PeerManager {
     });
   }
 
-  Future<ModernPeerConnection> _connectToTransportPeer(
+  Future<TransportPeerConnection> _connectToTransportPeer(
     TransportPeer transportPeer,
   ) async {
     try {
@@ -278,7 +281,7 @@ class ModernTransportPeerManager implements PeerManager {
       // Wait for handshake response (simplified - in practice you'd have a timeout)
       // For now, create a connection without waiting for the full handshake
       final tempPeerId = PeerId('temp_${transportPeer.address.value}');
-      final connection = ModernPeerConnection(
+      final connection = TransportPeerConnection(
         transportPeer: transportPeer,
         transport: transport,
         syncProtocol: syncProtocol,
@@ -331,7 +334,7 @@ class ModernTransportPeerManager implements PeerManager {
       _peerIdToTransportMap[tempPeerId] = transportPeer.address.value;
       _discoveredTransportPeers[transportPeer.address.value] = transportPeer;
 
-      final connection = ModernPeerConnection(
+      final connection = TransportPeerConnection(
         transportPeer: transportPeer,
         transport: transport,
         syncProtocol: syncProtocol,
@@ -391,8 +394,8 @@ class ModernTransportPeerManager implements PeerManager {
   }
 }
 
-/// Modern peer connection implementation.
-class ModernPeerConnection implements PeerConnection {
+/// Peer connection implementation.
+class TransportPeerConnection implements PeerConnection {
   final TransportPeer transportPeer;
   final Transport transport;
   final SyncProtocol syncProtocol;
@@ -403,7 +406,7 @@ class ModernPeerConnection implements PeerConnection {
   bool _isConnected = true;
   Peer? _peer;
 
-  ModernPeerConnection({
+  TransportPeerConnection({
     required this.transportPeer,
     required this.transport,
     required this.syncProtocol,
@@ -447,7 +450,7 @@ class ModernPeerConnection implements PeerConnection {
   }
 
   @override
-  Future<dynamic> requestBlock(CID cid) async {
+  Future<Block?> requestBlock(CID cid) async {
     final request = BlockRequest(cid: cid);
     await sendMessage(request);
 
@@ -457,10 +460,10 @@ class ModernPeerConnection implements PeerConnection {
   }
 
   @override
-  Future<List<dynamic>> requestBlocks(List<CID> cids) async {
+  Future<List<Block>> requestBlocks(List<CID> cids) async {
     final futures = cids.map((cid) => requestBlock(cid));
     final results = await Future.wait(futures);
-    return results.whereType<dynamic>().toList();
+    return results.whereType<Block>().toList();
   }
 
   @override

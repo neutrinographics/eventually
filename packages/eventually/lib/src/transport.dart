@@ -1,7 +1,6 @@
 import 'dart:typed_data';
 
 import 'package:meta/meta.dart';
-import 'package:eventually/eventually.dart';
 
 /// Type-safe address for transport peers (transport-specific addresses).
 class TransportPeerAddress {

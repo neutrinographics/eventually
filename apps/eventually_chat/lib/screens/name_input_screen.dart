@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../services/eventually_chat_service.dart';
+import '../services/chat_service.dart' hide debugPrint;
 import 'chat_screen.dart';
 
 class NameInputScreen extends StatefulWidget {
@@ -69,10 +69,7 @@ class _NameInputScreenState extends State<NameInputScreen> {
     });
 
     try {
-      final chatService = Provider.of<EventuallyChatService>(
-        context,
-        listen: false,
-      );
+      final chatService = Provider.of<ChatService>(context, listen: false);
 
       // Set the username
       await chatService.setUserName(name);

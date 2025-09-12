@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../services/eventually_chat_service.dart';
+import '../services/chat_service.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/peer_list_drawer.dart';
 import '../widgets/dag_stats_banner.dart';
@@ -39,10 +39,7 @@ class _ChatScreenState extends State<ChatScreen> {
     });
 
     try {
-      final chatService = Provider.of<EventuallyChatService>(
-        context,
-        listen: false,
-      );
+      final chatService = Provider.of<ChatService>(context, listen: false);
       if (!chatService.isStarted) {
         await chatService.start();
       }
@@ -68,10 +65,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final content = _messageController.text.trim();
     if (content.isEmpty) return;
 
-    final chatService = Provider.of<EventuallyChatService>(
-      context,
-      listen: false,
-    );
+    final chatService = Provider.of<ChatService>(context, listen: false);
     chatService.sendMessage(content);
     _messageController.clear();
     _scrollToBottom();
@@ -93,7 +87,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Consumer<EventuallyChatService>(
+        title: Consumer<ChatService>(
           builder: (context, chatService, child) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -113,7 +107,7 @@ class _ChatScreenState extends State<ChatScreen> {
         foregroundColor: Colors.white,
         actions: [
           // DAG stats button
-          Consumer<EventuallyChatService>(
+          Consumer<ChatService>(
             builder: (context, chatService, child) {
               return IconButton(
                 icon: Stack(
@@ -152,7 +146,7 @@ class _ChatScreenState extends State<ChatScreen> {
             },
           ),
           // Peers button
-          Consumer<EventuallyChatService>(
+          Consumer<ChatService>(
             builder: (context, chatService, child) {
               return IconButton(
                 icon: Stack(
@@ -198,7 +192,7 @@ class _ChatScreenState extends State<ChatScreen> {
       body: Column(
         children: [
           // DAG synchronization status banner
-          Consumer<EventuallyChatService>(
+          Consumer<ChatService>(
             builder: (context, chatService, child) {
               if (_isStarting) {
                 return Container(
@@ -246,7 +240,7 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
           // Messages list
           Expanded(
-            child: Consumer<EventuallyChatService>(
+            child: Consumer<ChatService>(
               builder: (context, chatService, child) {
                 if (chatService.messages.isEmpty) {
                   return Center(
@@ -349,7 +343,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Consumer<EventuallyChatService>(
+                  Consumer<ChatService>(
                     builder: (context, chatService, child) {
                       return FloatingActionButton(
                         mini: true,
@@ -374,7 +368,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _showDAGStats(BuildContext context, EventuallyChatService chatService) {
+  void _showDAGStats(BuildContext context, ChatService chatService) {
     showModalBottomSheet(
       context: context,
       builder: (context) => Container(
@@ -394,40 +388,59 @@ class _ChatScreenState extends State<ChatScreen> {
               ],
             ),
             const SizedBox(height: 16),
-            FutureBuilder(
-              future: chatService.getConnectionStats(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
+            FutureBuilder<Map<String, dynamic>>(
+              future: chatService.getDAGStats(),
+              builder: (context, dagSnapshot) {
+                if (dagSnapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                final stats = snapshot.data ?? {};
-                final dagStats = chatService.getDAGStats();
+                final dagStats = dagSnapshot.data ?? {};
 
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildStatRow('Total Blocks', '${dagStats.totalBlocks}'),
-                    _buildStatRow('Total Size', '${dagStats.totalSize} bytes'),
-                    _buildStatRow('Root Blocks', '${dagStats.rootBlocks}'),
-                    _buildStatRow('Leaf Blocks', '${dagStats.leafBlocks}'),
-                    _buildStatRow('Max Depth', '${dagStats.maxDepth}'),
-                    _buildStatRow(
-                      'Avg Depth',
-                      dagStats.averageDepth.toStringAsFixed(2),
-                    ),
-                    const Divider(),
-                    _buildStatRow(
-                      'Connected Peers',
-                      '${stats['onlinePeerCount']}',
-                    ),
-                    _buildStatRow('Messages', '${stats['messageCount']}'),
-                    _buildStatRow('Sync Operations', '${stats['syncCount']}'),
-                    _buildStatRow(
-                      'Sync Success Rate',
-                      '${(stats['syncSuccessRate'] * 100).toStringAsFixed(1)}%',
-                    ),
-                  ],
+                return FutureBuilder<Map<String, dynamic>>(
+                  future: Future.value(chatService.getConnectionStats()),
+                  builder: (context, statsSnapshot) {
+                    final stats = statsSnapshot.data ?? {};
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildStatRow(
+                          'Total Blocks',
+                          '${dagStats['total_blocks'] ?? 0}',
+                        ),
+                        _buildStatRow(
+                          'Total Size',
+                          '${dagStats['total_size'] ?? 0} bytes',
+                        ),
+                        _buildStatRow(
+                          'Root Blocks',
+                          '${dagStats['root_blocks'] ?? 0}',
+                        ),
+                        _buildStatRow(
+                          'Messages',
+                          '${dagStats['messages'] ?? 0}',
+                        ),
+                        const Divider(),
+                        _buildStatRow(
+                          'Connected Peers',
+                          '${stats['connected_peers'] ?? 0}',
+                        ),
+                        _buildStatRow(
+                          'Discovered Peers',
+                          '${stats['discovered_peers'] ?? 0}',
+                        ),
+                        _buildStatRow(
+                          'Transport Ready',
+                          '${stats['transport_ready'] ?? false}',
+                        ),
+                        _buildStatRow(
+                          'Sync Success Rate',
+                          '${((stats['syncSuccessRate'] ?? 0.0) * 100).toStringAsFixed(1)}%',
+                        ),
+                      ],
+                    );
+                  },
                 );
               },
             ),

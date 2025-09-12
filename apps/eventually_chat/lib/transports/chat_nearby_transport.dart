@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
-import 'package:nearby_connections/nearby_connections.dart' as nc;
-import 'package:meta/meta.dart';
+import 'package:nearby_connections/nearby_connections.dart';
 import 'package:eventually/eventually.dart';
 
 /// Chat-specific Nearby Connections transport implementation.
@@ -19,7 +18,7 @@ class ChatNearbyTransport implements Transport {
   final String serviceId;
 
   /// Connection strategy for nearby connections.
-  final nc.Strategy strategy;
+  final Strategy strategy;
 
   // Internal state
   bool _isInitialized = false;
@@ -36,7 +35,7 @@ class ChatNearbyTransport implements Transport {
     required this.nodeId,
     required this.displayName,
     this.serviceId = 'com.eventually.chat',
-    this.strategy = nc.Strategy.P2P_CLUSTER,
+    this.strategy = Strategy.P2P_CLUSTER,
   });
 
   @override
@@ -44,32 +43,11 @@ class ChatNearbyTransport implements Transport {
     if (_isInitialized) return;
 
     try {
-      // Request necessary permissions
-      final granted = await nc.Nearby()
-          .askLocationAndExternalStoragePermission();
-      if (!granted) {
-        throw const TransportException(
-          'Location and storage permissions are required for chat functionality',
-        );
-      }
-
       // Start advertising with chat-specific configuration
-      await nc.Nearby().startAdvertising(
-        displayName,
-        strategy,
-        onConnectionInitiated: _onConnectionInitiated,
-        onConnectionResult: _onConnectionResult,
-        onDisconnected: _onDisconnected,
-        serviceId: serviceId,
-      );
+      await _startAdvertising();
 
       // Start discovery
-      await nc.Nearby().startDiscovery(
-        serviceId,
-        strategy,
-        onEndpointFound: _onEndpointFound,
-        onEndpointLost: _onEndpointLost,
-      );
+      await _startDiscovery();
 
       _isAdvertising = true;
       _isDiscovering = true;
@@ -84,6 +62,32 @@ class ChatNearbyTransport implements Transport {
     }
   }
 
+  Future<void> _startAdvertising() async {
+    debugPrint('📡 Starting advertising with strategy: $strategy');
+    await Nearby().startAdvertising(
+      displayName,
+      strategy,
+      onConnectionInitiated: _onConnectionInitiated,
+      onConnectionResult: _onConnectionResult,
+      onDisconnected: _onDisconnected,
+      serviceId: serviceId,
+    );
+  }
+
+  Future<void> _startDiscovery() async {
+    debugPrint('🔍 Starting discovery with strategy: $strategy');
+    await Nearby().startDiscovery(
+      serviceId,
+      strategy,
+      onEndpointFound: _onEndpointFound,
+      onEndpointLost: (String? endpointId) {
+        if (endpointId != null) {
+          _onEndpointLost(endpointId);
+        }
+      },
+    );
+  }
+
   @override
   Future<void> shutdown() async {
     if (!_isInitialized) return;
@@ -92,25 +96,19 @@ class ChatNearbyTransport implements Transport {
       print('🛑 Shutting down chat transport');
 
       if (_isAdvertising) {
-        await nc.Nearby().stopAdvertising();
+        await Nearby().stopAdvertising();
         _isAdvertising = false;
       }
 
       if (_isDiscovering) {
-        await nc.Nearby().stopDiscovery();
+        await Nearby().stopDiscovery();
         _isDiscovering = false;
       }
 
       // Disconnect from all peers
-      final disconnectFutures = _connectedPeers.keys.map((endpointId) async {
-        try {
-          await Nearby().disconnectFromEndpoint(endpointId);
-        } catch (e) {
-          print('Error disconnecting from $endpointId: $e');
-        }
-      });
-
-      await Future.wait(disconnectFutures);
+      for (final peer in _connectedPeers.values) {
+        await Nearby().disconnectFromEndpoint(peer.address.value);
+      }
 
       _connectedPeers.clear();
       _discoveredPeers.clear();
@@ -135,30 +133,7 @@ class ChatNearbyTransport implements Transport {
       throw const TransportException('Transport not initialized');
     }
 
-    print('🔍 Discovering chat peers...');
-
-    // Restart discovery to get fresh results
-    if (_isDiscovering) {
-      await nc.Nearby().stopDiscovery();
-    }
-
-    await nc.Nearby().startDiscovery(
-      serviceId,
-      strategy,
-      onEndpointFound: _onEndpointFound,
-      onEndpointLost: _onEndpointLost,
-    );
-
-    _isDiscovering = true;
-
-    // Wait for discovery timeout or use default
-    final discoveryTimeout = timeout ?? const Duration(seconds: 8);
-    await Future.delayed(discoveryTimeout);
-
-    final discovered = _discoveredPeers.values.toList();
-    print('📱 Found ${discovered.length} chat peers');
-
-    return discovered;
+    return _discoveredPeers.values.toList();
   }
 
   @override
@@ -177,7 +152,7 @@ class ChatNearbyTransport implements Transport {
     }
 
     try {
-      await nc.Nearby().sendBytesPayload(peer.address.value, bytes);
+      await Nearby().sendBytesPayload(peer.address.value, bytes);
     } catch (e) {
       throw TransportException(
         'Failed to send message to ${peer.displayName}',
@@ -201,6 +176,7 @@ class ChatNearbyTransport implements Transport {
   /// Manually connect to a discovered peer.
   ///
   /// This is useful for initiating chat connections to specific users.
+  @Deprecated('You should not manually connect to peers')
   Future<void> connectToPeer(TransportPeer peer) async {
     if (!_isInitialized) {
       throw const TransportException('Transport not initialized');
@@ -213,7 +189,7 @@ class ChatNearbyTransport implements Transport {
     try {
       print('🤝 Connecting to ${peer.displayName}...');
 
-      await nc.Nearby().requestConnection(
+      await Nearby().requestConnection(
         displayName,
         peer.address.value,
         onConnectionInitiated: _onConnectionInitiated,
@@ -268,7 +244,7 @@ class ChatNearbyTransport implements Transport {
 
   void _onConnectionInitiated(
     String endpointId,
-    nc.ConnectionInfo connectionInfo,
+    ConnectionInfo connectionInfo,
   ) {
     final peer = _discoveredPeers[endpointId];
     final peerName = peer?.displayName ?? 'Unknown User';
@@ -277,7 +253,7 @@ class ChatNearbyTransport implements Transport {
 
     // Auto-accept all connection requests for the chat app
     // In a production app, you might want to show a dialog
-    nc.Nearby().acceptConnection(
+    Nearby().acceptConnection(
       endpointId,
       onPayLoadRecieved: _onPayloadReceived,
       onPayloadTransferUpdate: _onPayloadTransferUpdate,
@@ -316,14 +292,10 @@ class ChatNearbyTransport implements Transport {
     }
   }
 
-  void _onPayloadReceived(String endpointId, nc.Payload payload) {
+  void _onPayloadReceived(String endpointId, Payload payload) {
     final peer = _connectedPeers[endpointId];
     if (peer != null && payload.bytes != null) {
-      final incomingBytes = IncomingBytes(
-        peer,
-        Uint8List.fromList(payload.bytes!),
-        DateTime.now(),
-      );
+      final incomingBytes = IncomingBytes(peer, payload.bytes!, DateTime.now());
 
       if (!_incomingBytesController.isClosed) {
         _incomingBytesController.add(incomingBytes);
@@ -333,7 +305,7 @@ class ChatNearbyTransport implements Transport {
 
   void _onPayloadTransferUpdate(
     String endpointId,
-    nc.PayloadTransferUpdate update,
+    PayloadTransferUpdate update,
   ) {
     // Handle payload transfer updates if needed
     // This could be used for progress tracking on large file transfers

@@ -12,14 +12,9 @@ export 'src/store.dart' hide BlockNotFoundException;
 export 'src/sync.dart';
 export 'src/peer.dart';
 export 'src/peer_config.dart';
-export 'src/peer_manager_base.dart';
 export 'src/transport.dart';
-export 'src/transport_endpoint.dart' hide TransportException;
-export 'src/transport_peer_manager.dart'
-    hide PeerDiscoveryStarted, PeerDiscoveryStopped;
-export 'src/transports/nearby_transport.dart';
-export 'src/transports/tcp_transport.dart';
-export 'src/peer_handshake.dart';
+export 'src/transport_peer_manager.dart';
+export 'src/peer_handshake.dart' hide TransportPeerConnection;
 export 'src/protocol.dart';
 export 'src/hash.dart';
 export 'src/codec.dart' hide Codec;

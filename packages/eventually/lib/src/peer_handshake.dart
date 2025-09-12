@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:eventually/src/transport.dart';
 import 'package:meta/meta.dart';
-import 'transport_endpoint.dart';
 import 'peer.dart';
 import 'block.dart';
 import 'cid.dart';

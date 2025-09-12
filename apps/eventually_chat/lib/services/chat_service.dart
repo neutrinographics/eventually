@@ -1,9 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' hide debugPrint;
-import 'package:flutter/material.dart' hide debugPrint;
 import 'package:eventually/eventually.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
@@ -14,18 +12,18 @@ import '../transports/chat_nearby_transport.dart';
 import 'hive_dag_store.dart';
 import 'permissions_service.dart';
 
-/// Modern chat service using the new Transport interface.
+/// Chat service using the Eventually library for Merkle DAG synchronization.
 ///
-/// This service demonstrates the new transport architecture by implementing
+/// This service demonstrates the transport architecture by implementing
 /// a distributed chat system using the clean separation between transport,
 /// protocol, and application layers.
 ///
-/// Key improvements:
+/// Key features:
 /// - Clean separation of transport and protocol layers
 /// - Pluggable transport implementations
 /// - Better error handling and connection management
 /// - Simplified peer lifecycle management
-class ModernChatService with ChangeNotifier {
+class ChatService with ChangeNotifier {
   static const String _userNameKey = 'user_name_eventually';
   static const String _userIdKey = 'user_id_eventually';
 
@@ -35,7 +33,7 @@ class ModernChatService with ChangeNotifier {
   late final HiveDAGStore _store;
   late final DAG _dag;
   late final ChatNearbyTransport _transport;
-  late final ModernTransportPeerManager _peerManager;
+  late final TransportPeerManager _peerManager;
   late final DefaultSynchronizer _synchronizer;
 
   final List<ChatMessage> _messages = [];
@@ -127,7 +125,7 @@ class ModernChatService with ChangeNotifier {
         healthCheckInterval: const Duration(seconds: 60),
       );
 
-      _peerManager = ModernTransportPeerManager(
+      _peerManager = TransportPeerManager(
         transport: _transport,
         config: config,
       );
@@ -144,7 +142,7 @@ class ModernChatService with ChangeNotifier {
       _setupEventListeners();
 
       _isInitialized = true;
-      debugPrint('✅ Modern chat service initialized');
+      debugPrint('✅ Chat service initialized');
       notifyListeners();
     } catch (e, stackTrace) {
       _error = 'Failed to initialize: ${e.toString()}';
@@ -174,7 +172,7 @@ class ModernChatService with ChangeNotifier {
       _startPresenceAnnouncement();
 
       _isStarted = true;
-      debugPrint('🚀 Modern chat service started');
+      debugPrint('🚀 Chat service started');
       notifyListeners();
     } catch (e, stackTrace) {
       _error = 'Failed to start: ${e.toString()}';
@@ -195,7 +193,7 @@ class ModernChatService with ChangeNotifier {
       await _peerManager.stopDiscovery();
 
       _isStarted = false;
-      debugPrint('🛑 Modern chat service stopped');
+      debugPrint('🛑 Chat service stopped');
       notifyListeners();
     } catch (e, stackTrace) {
       _error = 'Failed to stop: ${e.toString()}';
@@ -588,6 +586,6 @@ enum UserPresence { online, offline, away }
 
 void debugPrint(String message) {
   if (kDebugMode) {
-    print('[ModernChatService] $message');
+    print('[ChatService] $message');
   }
 }

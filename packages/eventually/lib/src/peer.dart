@@ -90,21 +90,6 @@ class Peer {
     );
   }
 
-  /// Creates a copy with updated transport peer information.
-  Peer updateTransportPeer(TransportPeer transportPeer) {
-    return copyWith(transportPeer: transportPeer);
-  }
-
-  /// Creates a copy marking the peer as contacted at the current time.
-  Peer markContacted() {
-    return copyWith(lastContactTime: DateTime.now());
-  }
-
-  /// Creates a copy with updated activity status.
-  Peer updateActivity(bool isActive) {
-    return copyWith(isActive: isActive);
-  }
-
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
