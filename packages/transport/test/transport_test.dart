@@ -22,7 +22,7 @@ class MockTransportProtocol implements TransportProtocol {
       _incomingController.stream;
 
   @override
-  Future<void> startListening(DeviceAddress address) async {
+  Future<void> startListening() async {
     _isListening = true;
   }
 
@@ -151,13 +151,11 @@ void main() {
         recipientId: PeerId('recipient'),
         data: Uint8List.fromList([1, 2, 3, 4]),
         timestamp: DateTime.now(),
-        messageId: 'test-message',
       );
 
       expect(message.senderId.value, equals('sender'));
       expect(message.recipientId.value, equals('recipient'));
       expect(message.data, equals(Uint8List.fromList([1, 2, 3, 4])));
-      expect(message.messageId, equals('test-message'));
     });
   });
 
@@ -398,7 +396,7 @@ void main() {
     test('starts and stops correctly', () async {
       expect(transport.isStarted, isFalse);
 
-      await transport.start(listenAddress: DeviceAddress('test-addr'));
+      await transport.start();
       expect(transport.isStarted, isTrue);
       expect(mockProtocol.isListening, isTrue);
 

@@ -128,7 +128,6 @@ class TransportMessage {
     required this.recipientId,
     required this.data,
     required this.timestamp,
-    this.messageId,
     this.metadata = const {},
   });
 
@@ -144,9 +143,6 @@ class TransportMessage {
   /// When this message was created
   final DateTime timestamp;
 
-  /// Optional unique identifier for this message
-  final String? messageId;
-
   /// Additional metadata about the message
   final Map<String, dynamic> metadata;
 
@@ -157,14 +153,14 @@ class TransportMessage {
           runtimeType == other.runtimeType &&
           senderId == other.senderId &&
           recipientId == other.recipientId &&
-          messageId == other.messageId;
+          data == other.data &&
+          timestamp == other.timestamp;
 
   @override
-  int get hashCode => Object.hash(senderId, recipientId, messageId);
+  int get hashCode => Object.hash(senderId, recipientId, data, timestamp);
 
   @override
-  String toString() =>
-      'TransportMessage(from: $senderId, to: $recipientId, id: $messageId)';
+  String toString() => 'TransportMessage(from: $senderId, to: $recipientId)';
 }
 
 /// Result of a connection attempt

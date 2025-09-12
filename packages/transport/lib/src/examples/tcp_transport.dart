@@ -21,25 +21,13 @@ class TcpTransportProtocol implements TransportProtocol {
   bool get isListening => _serverSocket != null;
 
   @override
-  Future<void> startListening(DeviceAddress address) async {
+  Future<void> startListening() async {
     if (isListening) return;
-
-    // Parse address (expected format: "ip:port")
-    final parts = address.value.split(':');
-    if (parts.length != 2) {
-      throw ArgumentError('Invalid TCP address format. Expected "ip:port"');
-    }
-
-    final host = parts[0];
-    final port = int.tryParse(parts[1]);
-    if (port == null) {
-      throw ArgumentError('Invalid port number: ${parts[1]}');
-    }
 
     try {
       _serverSocket = await ServerSocket.bind(
-        host == '0.0.0.0' ? InternetAddress.anyIPv4 : InternetAddress(host),
-        port,
+        InternetAddress.anyIPv4,
+        0, // Let the system choose an available port
       );
 
       _serverSocket!.listen(_handleIncomingSocket);
@@ -47,6 +35,13 @@ class TcpTransportProtocol implements TransportProtocol {
       _serverSocket = null;
       rethrow;
     }
+  }
+
+  /// Get the address this transport is listening on
+  DeviceAddress? get listeningAddress {
+    final socket = _serverSocket;
+    if (socket == null) return null;
+    return DeviceAddress('${socket.address.address}:${socket.port}');
   }
 
   @override

@@ -5,8 +5,8 @@ import 'models.dart';
 
 /// Abstract interface for low-level transport protocols (e.g., TCP, WebSocket, Bluetooth)
 abstract interface class TransportProtocol {
-  /// Start listening for incoming connections on the given address
-  Future<void> startListening(DeviceAddress address);
+  /// Start listening for incoming connections
+  Future<void> startListening();
 
   /// Stop listening for incoming connections
   Future<void> stopListening();

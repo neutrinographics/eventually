@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:typed_data';
-import 'dart:math';
 
 import 'package:transport/transport.dart';
 
@@ -28,7 +27,7 @@ class InMemoryTransportProtocol implements TransportProtocol {
   }
 
   @override
-  Future<void> startListening(DeviceAddress address) async {
+  Future<void> startListening() async {
     if (_isListening) return;
 
     _instances[address.value] = this;
@@ -224,8 +223,8 @@ Future<void> main() async {
   try {
     // Start both transport managers
     print('\n📡 Starting transport managers...');
-    await peer1Transport.start(listenAddress: peer1Address);
-    await peer2Transport.start(listenAddress: peer2Address);
+    await peer1Transport.start();
+    await peer2Transport.start();
 
     // Manually add peer 2 to peer 1's peer list (simulating discovery)
     print('\n🔍 Simulating peer discovery...');
@@ -265,7 +264,6 @@ Future<void> main() async {
         recipientId: peer2Id,
         data: Uint8List.fromList('Hello from Peer 1! 👋'.codeUnits),
         timestamp: DateTime.now(),
-        messageId: 'msg-${Random().nextInt(1000)}',
       );
 
       final sent1 = await peer1Transport.sendMessage(message1);
@@ -281,7 +279,6 @@ Future<void> main() async {
         recipientId: peer1Id,
         data: Uint8List.fromList('Hello back from Peer 2! 🎉'.codeUnits),
         timestamp: DateTime.now(),
-        messageId: 'msg-${Random().nextInt(1000)}',
       );
 
       final sent2 = await peer2Transport.sendMessage(message2);

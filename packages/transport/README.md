@@ -49,7 +49,7 @@ transport.messagesReceived.listen((message) {
 });
 
 // Start the transport
-await transport.start(listenAddress: DeviceAddress('0.0.0.0:8080'));
+await transport.start();
 
 // Connect to a peer (after discovery)
 final result = await transport.connectToPeer(PeerId('other-peer'));
@@ -101,7 +101,7 @@ Low-level transport implementation (TCP, WebSocket, etc.)
 
 ```dart
 abstract interface class TransportProtocol {
-  Future<void> startListening(DeviceAddress address);
+  Future<void> startListening();
   Future<void> stopListening();
   Future<TransportConnection?> connect(DeviceAddress address);
   Stream<IncomingConnectionAttempt> get incomingConnections;
@@ -156,8 +156,9 @@ To implement a custom transport (e.g., for nearby connections, custom UDP, etc.)
 ```dart
 class MyTransportProtocol implements TransportProtocol {
   @override
-  Future<void> startListening(DeviceAddress address) async {
-    // Start listening for connections on the given address
+  Future<void> startListening() async {
+    // Start listening for connections
+    // The address/port configuration is handled internally
   }
 
   @override

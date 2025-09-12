@@ -26,6 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Example TCP transport protocol implementation
 - Complete documentation and usage examples
 
+### Design Decisions
+- `TransportManager.start()` method simplified - no address parameter needed as transport protocols handle their own configuration
+- `TransportMessage` simplified - no optional message ID field, applications can include IDs in their payload if needed
+- Transport protocols are responsible for their own listening address configuration
+
 ### Features
 - **Transport Protocols**: Pluggable low-level transport implementations
 - **Handshake Protocols**: Customizable peer identification during connection

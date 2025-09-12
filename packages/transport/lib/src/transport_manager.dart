@@ -85,14 +85,12 @@ class TransportManager {
   }
 
   /// Start the transport manager
-  Future<void> start({DeviceAddress? listenAddress}) async {
+  Future<void> start() async {
     if (_isStarted || _isDisposed) return;
 
     try {
       // Start listening for connections
-      if (listenAddress != null) {
-        await _config.protocol.startListening(listenAddress);
-      }
+      await _config.protocol.startListening();
 
       // Start peer discovery if available
       final discovery = _config.peerDiscovery;
@@ -491,21 +489,8 @@ class _PeerConnection {
   Future<void> sendMessage(TransportMessage message) async {
     if (!isConnected) throw StateError('Connection is not open');
 
-    // Simple message format: [messageId length][messageId][data]
-    final messageIdBytes = (message.messageId ?? '').codeUnits;
-    final messageIdLength = messageIdBytes.length;
-    final data = Uint8List(4 + messageIdLength + message.data.length);
-
-    // Write message ID length (4 bytes)
-    data.buffer.asByteData().setUint32(0, messageIdLength, Endian.big);
-
-    // Write message ID
-    data.setRange(4, 4 + messageIdLength, messageIdBytes);
-
-    // Write message data
-    data.setRange(4 + messageIdLength, data.length, message.data);
-
-    await connection.send(data);
+    // Simple message format: just send the data directly
+    await connection.send(message.data);
   }
 
   /// Disconnect this connection
@@ -526,22 +511,11 @@ class _PeerConnection {
   /// Handle incoming raw data and convert to messages
   void _handleIncomingData(Uint8List data) {
     try {
-      // Parse message format: [messageId length][messageId][data]
-      if (data.length < 4) return;
-
-      final messageIdLength = data.buffer.asByteData().getUint32(0, Endian.big);
-      if (data.length < 4 + messageIdLength) return;
-
-      final messageIdBytes = data.sublist(4, 4 + messageIdLength);
-      final messageId = String.fromCharCodes(messageIdBytes);
-      final messageData = data.sublist(4 + messageIdLength);
-
       final message = TransportMessage(
         senderId: peerId,
         recipientId: localPeerId,
-        data: messageData,
+        data: data,
         timestamp: DateTime.now(),
-        messageId: messageId.isEmpty ? null : messageId,
       );
 
       onMessage(message);
