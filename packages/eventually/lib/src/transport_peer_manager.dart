@@ -13,6 +13,7 @@ import 'transport.dart';
 /// This class manages the lifecycle of peer connections, including discovery,
 /// handshake, protocol negotiation, and message routing between the transport
 /// layer and application layer.
+/// TODO: Is this a duplicate of transport?
 class TransportPeerManager implements PeerManager {
   /// The transport layer for network communication.
   final Transport transport;
@@ -119,13 +120,13 @@ class TransportPeerManager implements PeerManager {
   }
 
   @override
-  Future<PeerConnection> connectToEndpoint(String endpointAddress) async {
+  Future<PeerConnection> connectToEndpoint(TransportPeerAddress address) async {
     if (!_isInitialized) {
       throw PeerException('Peer manager not initialized');
     }
 
     // Check if we already have a connection to this endpoint
-    final existingPeerId = _transportToPeerIdMap[endpointAddress];
+    final existingPeerId = _transportToPeerIdMap[address.value];
     if (existingPeerId != null) {
       final existingConnection = _connections[existingPeerId];
       if (existingConnection != null && existingConnection.isConnected) {
@@ -134,9 +135,9 @@ class TransportPeerManager implements PeerManager {
     }
 
     // Find the transport peer for this endpoint
-    final transportPeer = _discoveredTransportPeers[endpointAddress];
+    final transportPeer = _discoveredTransportPeers[address.value];
     if (transportPeer == null) {
-      throw PeerException('Unknown transport endpoint: $endpointAddress');
+      throw PeerException('Unknown transport endpoint: $address');
     }
 
     return await _connectToTransportPeer(transportPeer);

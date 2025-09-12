@@ -361,7 +361,7 @@ abstract interface class PeerManager {
 
   /// Connects to a transport endpoint and performs peer discovery.
   /// Returns a connection once the peer identity is established.
-  Future<PeerConnection> connectToEndpoint(String endpointAddress);
+  Future<PeerConnection> connectToEndpoint(TransportPeerAddress address);
 
   /// Gets the connection for a known peer.
   PeerConnection? getConnection(PeerId peerId);
