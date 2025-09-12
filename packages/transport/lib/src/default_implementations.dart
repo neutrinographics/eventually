@@ -211,8 +211,8 @@ class BroadcastDeviceDiscovery implements DeviceDiscovery {
   final Map<DeviceAddress, _DiscoveredDeviceInfo> _discoveredDevices = {};
   final StreamController<DiscoveredDevice> _devicesDiscoveredController =
       StreamController<DiscoveredDevice>.broadcast();
-  final StreamController<DiscoveredDevice> _devicesLostController =
-      StreamController<DiscoveredDevice>.broadcast();
+  final StreamController<DeviceAddress> _devicesLostController =
+      StreamController<DeviceAddress>.broadcast();
 
   Timer? _broadcastTimer;
   Timer? _cleanupTimer;
@@ -223,7 +223,7 @@ class BroadcastDeviceDiscovery implements DeviceDiscovery {
       _devicesDiscoveredController.stream;
 
   @override
-  Stream<DiscoveredDevice> get devicesLost => _devicesLostController.stream;
+  Stream<DeviceAddress> get devicesLost => _devicesLostController.stream;
 
   @override
   bool get isDiscovering => _isDiscovering;
@@ -265,7 +265,7 @@ class BroadcastDeviceDiscovery implements DeviceDiscovery {
     _discoveredDevices.clear();
 
     for (final device in devices) {
-      _devicesLostController.add(device);
+      _devicesLostController.add(device.address);
     }
   }
 
@@ -337,7 +337,7 @@ class BroadcastDeviceDiscovery implements DeviceDiscovery {
     for (final address in staleAddresses) {
       final info = _discoveredDevices.remove(address);
       if (info != null) {
-        _devicesLostController.add(info.device);
+        _devicesLostController.add(info.device.address);
       }
     }
   }

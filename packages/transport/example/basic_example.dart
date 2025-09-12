@@ -8,6 +8,9 @@ class InMemoryTransportProtocol implements TransportProtocol {
   InMemoryTransportProtocol(this.address) {
     _incomingController =
         StreamController<IncomingConnectionAttempt>.broadcast();
+    _devicesDiscoveredController =
+        StreamController<DiscoveredDevice>.broadcast();
+    _devicesLostController = StreamController<DeviceAddress>.broadcast();
   }
 
   static final Map<String, InMemoryTransportProtocol> _instances = {};
@@ -16,15 +19,28 @@ class InMemoryTransportProtocol implements TransportProtocol {
 
   final DeviceAddress address;
   bool _isListening = false;
+  bool _isDiscovering = false;
   late final StreamController<IncomingConnectionAttempt> _incomingController;
+  late final StreamController<DiscoveredDevice> _devicesDiscoveredController;
+  late final StreamController<DeviceAddress> _devicesLostController;
 
   @override
   bool get isListening => _isListening;
 
   @override
+  bool get isDiscovering => _isDiscovering;
+
+  @override
   Stream<IncomingConnectionAttempt> get incomingConnections {
     return _incomingController.stream;
   }
+
+  @override
+  Stream<DiscoveredDevice> get devicesDiscovered =>
+      _devicesDiscoveredController.stream;
+
+  @override
+  Stream<DeviceAddress> get devicesLost => _devicesLostController.stream;
 
   @override
   Future<void> startListening() async {
@@ -43,6 +59,31 @@ class InMemoryTransportProtocol implements TransportProtocol {
     await _listeners[address.value]?.close();
     _listeners.remove(address.value);
     _isListening = false;
+  }
+
+  @override
+  Future<void> startDiscovery() async {
+    if (_isDiscovering) return;
+    _isDiscovering = true;
+
+    // Simulate discovery by emitting existing instances
+    for (final instanceAddress in _instances.keys) {
+      if (instanceAddress != address.value) {
+        final device = DiscoveredDevice(
+          address: DeviceAddress(instanceAddress),
+          displayName: 'InMemory Device ($instanceAddress)',
+          discoveredAt: DateTime.now(),
+          metadata: {},
+        );
+        _devicesDiscoveredController.add(device);
+      }
+    }
+  }
+
+  @override
+  Future<void> stopDiscovery() async {
+    if (!_isDiscovering) return;
+    _isDiscovering = false;
   }
 
   @override
@@ -74,6 +115,32 @@ class InMemoryTransportProtocol implements TransportProtocol {
     listener.add(attempt);
 
     return localConnection;
+  }
+
+  /// Simulate receiving a broadcast for device discovery
+  void simulateReceivedBroadcast({
+    required DeviceAddress address,
+    required String displayName,
+  }) {
+    if (_isDiscovering) {
+      final device = DiscoveredDevice(
+        address: address,
+        displayName: displayName,
+        discoveredAt: DateTime.now(),
+        metadata: {},
+      );
+      _devicesDiscoveredController.add(device);
+    }
+  }
+
+  /// Simulate a device going offline
+  void simulateDeviceLost({
+    required DeviceAddress address,
+    required String displayName,
+  }) {
+    if (_isDiscovering) {
+      _devicesLostController.add(address);
+    }
   }
 }
 
@@ -175,10 +242,6 @@ Future<void> main() async {
     handshakeProtocol: NoOpHandshakeProtocol(
       peer2Id,
     ), // Expect to connect to peer2
-    deviceDiscovery: BroadcastDeviceDiscovery(
-      localDisplayName: 'Peer 1 Device',
-      broadcastInterval: const Duration(seconds: 1),
-    ),
     connectionPolicy: const AutoConnectPolicy(),
     peerStore: InMemoryPeerStore(),
   );
@@ -190,10 +253,6 @@ Future<void> main() async {
     handshakeProtocol: NoOpHandshakeProtocol(
       peer1Id,
     ), // Expect connections from peer1
-    deviceDiscovery: BroadcastDeviceDiscovery(
-      localDisplayName: 'Peer 2 Device',
-      broadcastInterval: const Duration(seconds: 1),
-    ),
     connectionPolicy: const AutoConnectPolicy(),
     peerStore: InMemoryPeerStore(),
   );
@@ -238,8 +297,8 @@ Future<void> main() async {
     print('\n🔍 Simulating device discovery...');
 
     // Simulate peer 1 discovering peer 2's device
-    if (peer1Config.deviceDiscovery is BroadcastDeviceDiscovery) {
-      (peer1Config.deviceDiscovery! as BroadcastDeviceDiscovery)
+    if (peer1Config.protocol is InMemoryTransportProtocol) {
+      (peer1Config.protocol as InMemoryTransportProtocol)
           .simulateReceivedBroadcast(
             address: peer2Address,
             displayName: 'Peer 2 Device',

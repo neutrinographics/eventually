@@ -12,13 +12,29 @@ class TcpTransportProtocol implements TransportProtocol {
   ServerSocket? _serverSocket;
   final StreamController<IncomingConnectionAttempt> _incomingController =
       StreamController<IncomingConnectionAttempt>.broadcast();
+  final StreamController<DiscoveredDevice> _devicesDiscoveredController =
+      StreamController<DiscoveredDevice>.broadcast();
+  final StreamController<DeviceAddress> _devicesLostController =
+      StreamController<DeviceAddress>.broadcast();
+
+  bool _isDiscovering = false;
 
   @override
   Stream<IncomingConnectionAttempt> get incomingConnections =>
       _incomingController.stream;
 
   @override
+  Stream<DiscoveredDevice> get devicesDiscovered =>
+      _devicesDiscoveredController.stream;
+
+  @override
+  Stream<DeviceAddress> get devicesLost => _devicesLostController.stream;
+
+  @override
   bool get isListening => _serverSocket != null;
+
+  @override
+  bool get isDiscovering => _isDiscovering;
 
   @override
   Future<void> startListening() async {
@@ -50,6 +66,24 @@ class TcpTransportProtocol implements TransportProtocol {
 
     await _serverSocket!.close();
     _serverSocket = null;
+  }
+
+  @override
+  Future<void> startDiscovery() async {
+    if (_isDiscovering) return;
+    _isDiscovering = true;
+
+    // TCP doesn't have native discovery, so this is a no-op
+    // In a real implementation, you might use mDNS, UPnP, or broadcast packets
+    // For now, discovery must be done manually via connectToPeer
+  }
+
+  @override
+  Future<void> stopDiscovery() async {
+    if (!_isDiscovering) return;
+    _isDiscovering = false;
+
+    // Stop any discovery mechanisms
   }
 
   @override
@@ -90,7 +124,10 @@ class TcpTransportProtocol implements TransportProtocol {
   /// Dispose of this transport protocol and clean up resources
   Future<void> dispose() async {
     await stopListening();
+    await stopDiscovery();
     await _incomingController.close();
+    await _devicesDiscoveredController.close();
+    await _devicesLostController.close();
   }
 }
 

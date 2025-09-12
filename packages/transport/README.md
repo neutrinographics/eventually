@@ -118,14 +118,23 @@ Three built-in approval mechanisms:
 The transport library is built around several key interfaces:
 
 ### TransportProtocol
-Low-level transport implementation (TCP, WebSocket, etc.)
+Low-level transport implementation (TCP, WebSocket, etc.) with built-in device discovery
 
 ```dart
 abstract interface class TransportProtocol {
+  // Connection management
   Future<void> startListening();
   Future<void> stopListening();
   Future<TransportConnection?> connect(DeviceAddress address);
   Stream<IncomingConnectionAttempt> get incomingConnections;
+  bool get isListening;
+  
+  // Device discovery (integrated)
+  Future<void> startDiscovery();
+  Future<void> stopDiscovery();
+  Stream<DiscoveredDevice> get devicesDiscovered;
+  Stream<DiscoveredDevice> get devicesLost;
+  bool get isDiscovering;
 }
 ```
 
@@ -145,17 +154,10 @@ abstract interface class HandshakeProtocol {
 }
 ```
 
-### DeviceDiscovery
-Mechanism for finding devices on the network (before peer identification)
+### ~~DeviceDiscovery~~ (Deprecated)
+Device discovery is now integrated into TransportProtocol. The separate DeviceDiscovery interface has been deprecated and will be removed in a future version.
 
-```dart
-abstract interface class DeviceDiscovery {
-  Future<void> startDiscovery();
-  Future<void> stopDiscovery();
-  Stream<DiscoveredDevice> get devicesDiscovered;
-  Stream<DiscoveredDevice> get devicesLost;
-}
-```
+Previously, device discovery was a separate component, but it's now part of the transport protocol implementation since different transport types (TCP, Bluetooth, WebSocket) require different discovery mechanisms.
 
 ### PeerStore
 Persistent storage for peer information
@@ -172,14 +174,14 @@ abstract interface class PeerStore {
 
 ## Implementing Custom Transport Protocols
 
-To implement a custom transport (e.g., for nearby connections, custom UDP, etc.):
+To implement a custom transport (e.g., for nearby connections, custom UDP, etc.), you now need to implement both connection management and device discovery:
 
 ```dart
 class MyTransportProtocol implements TransportProtocol {
+  // Connection management
   @override
   Future<void> startListening() async {
     // Start listening for connections
-    // The address/port configuration is handled internally
   }
 
   @override
@@ -187,16 +189,16 @@ class MyTransportProtocol implements TransportProtocol {
     // Establish connection to the address
     // Return TransportConnection or null if failed
   }
-
+  
   @override
   Stream<IncomingConnectionAttempt> get incomingConnections {
-    // Return stream of incoming connection attempts
+    // Return stream of connection attempts
   }
 
-  // ... implement other methods
-}
+  @override
+  bool get isListening => _isListening;
 
-class MyDeviceDiscovery implements DeviceDiscovery {
+  // Device discovery (integrated)
   @override
   Future<void> startDiscovery() async {
     // Start discovering devices (e.g., broadcast, mDNS, Bluetooth scan)
@@ -207,8 +209,16 @@ class MyDeviceDiscovery implements DeviceDiscovery {
     // Return stream of discovered devices with addresses and display names
   }
 
-  // ... implement other methods
+  @override
+  Stream<DiscoveredDevice> get devicesLost {
+    // Return stream of devices that are no longer available
+  }
+
+  @override
+  bool get isDiscovering => _isDiscovering;
 }
+
+// Device discovery is now part of TransportProtocol - no separate implementation needed!
 
 class MyTransportConnection implements TransportConnection {
   @override
@@ -258,10 +268,9 @@ class CustomHandshakeProtocol implements HandshakeProtocol {
 ```dart
 final config = TransportConfig(
   localPeerId: PeerId('test-peer'),
-  protocol: myProtocol,
-  handshakeProtocol: myHandshake,       // Optional - defaults to JsonHandshakeProtocol
-  approvalHandler: myApprovalHandler,   // Optional - defaults to AutoApprovalHandler
-  deviceDiscovery: myDeviceDiscovery,      // Optional - internal device discovery
+  protocol: myProtocol,                    // Includes device discovery
+  handshakeProtocol: myHandshake,          // Optional - defaults to JsonHandshakeProtocol
+  approvalHandler: myApprovalHandler,      // Optional - defaults to AutoApprovalHandler
   connectionPolicy: myConnectionPolicy,    // Optional - which devices to connect to
   peerStore: myStore,                      // Optional - peer persistence
   connectionTimeout: Duration(seconds: 30),
@@ -295,16 +304,13 @@ In-memory peer storage with live updates:
 final store = InMemoryPeerStore();
 ```
 
-### BroadcastDeviceDiscovery
-Broadcast-based device discovery (internal to transport layer):
+### ~~BroadcastDeviceDiscovery~~ (Deprecated)
+BroadcastDeviceDiscovery is still available for backward compatibility, but device discovery should now be implemented within your TransportProtocol. Different transport protocols will have different discovery mechanisms:
 
-```dart
-final discovery = BroadcastDeviceDiscovery(
-  localDisplayName: 'My Device',
-  broadcastInterval: Duration(seconds: 5),
-  deviceTimeout: Duration(minutes: 2),
-);
-```
+- **TCP/UDP**: mDNS, UPnP, or broadcast packets
+- **Bluetooth**: Bluetooth device scanning
+- **WebSocket**: Server-mediated discovery
+- **Nearby Connections**: Platform-specific nearby discovery APIs
 
 ### Connection Policies
 Control which discovered devices to automatically connect to:

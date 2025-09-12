@@ -5,6 +5,7 @@ import 'models.dart';
 import 'default_implementations.dart';
 
 /// Abstract interface for low-level transport protocols (e.g., TCP, WebSocket, Bluetooth)
+/// Includes both connection management and device discovery capabilities
 abstract interface class TransportProtocol {
   /// Start listening for incoming connections
   Future<void> startListening();
@@ -12,20 +13,36 @@ abstract interface class TransportProtocol {
   /// Stop listening for incoming connections
   Future<void> stopListening();
 
+  /// Start discovering devices on the network
+  Future<void> startDiscovery();
+
+  /// Stop discovering devices on the network
+  Future<void> stopDiscovery();
+
   /// Attempt to connect to a peer at the given address
   Future<TransportConnection?> connect(DeviceAddress address);
 
   /// Stream of incoming connection attempts
   Stream<IncomingConnectionAttempt> get incomingConnections;
 
+  /// Stream of newly discovered devices
+  Stream<DiscoveredDevice> get devicesDiscovered;
+
+  /// Stream of devices that are no longer available
+  Stream<DeviceAddress> get devicesLost;
+
   /// Whether this transport is currently listening for connections
   bool get isListening;
+
+  /// Whether discovery is currently active
+  bool get isDiscovering;
 }
 
 /// Represents an incoming connection attempt from a remote peer
 class IncomingConnectionAttempt {
   const IncomingConnectionAttempt({
     required this.connection,
+    // TODO: the address here is redundant because connection already has an address.
     required this.address,
   });
 
@@ -141,7 +158,11 @@ class ManualApprovalHandler implements ConnectionApprovalHandler {
   }
 }
 
-/// Interface for discovering devices on the network (before peer identification)
+/// Legacy interface - device discovery is now part of TransportProtocol
+/// This interface is kept for backward compatibility and will be removed in a future version
+@Deprecated(
+  'Use TransportProtocol.startDiscovery/stopDiscovery and related methods instead',
+)
 abstract interface class DeviceDiscovery {
   /// Start discovering devices
   Future<void> startDiscovery();
@@ -153,7 +174,7 @@ abstract interface class DeviceDiscovery {
   Stream<DiscoveredDevice> get devicesDiscovered;
 
   /// Stream of devices that are no longer available
-  Stream<DiscoveredDevice> get devicesLost;
+  Stream<DeviceAddress> get devicesLost;
 
   /// Whether discovery is currently active
   bool get isDiscovering;
@@ -247,7 +268,7 @@ class NoOpDeviceDiscovery implements DeviceDiscovery {
   Stream<DiscoveredDevice> get devicesDiscovered => const Stream.empty();
 
   @override
-  Stream<DiscoveredDevice> get devicesLost => const Stream.empty();
+  Stream<DeviceAddress> get devicesLost => const Stream.empty();
 
   @override
   Future<void> startDiscovery() async {}
@@ -263,6 +284,7 @@ class TransportConfig {
     required this.protocol,
     this.handshakeProtocol = const JsonHandshakeProtocol(),
     this.approvalHandler = const AutoApprovalHandler(),
+    @Deprecated('Device discovery is now handled by TransportProtocol')
     this.deviceDiscovery,
     this.connectionPolicy,
     this.peerStore,
@@ -283,7 +305,8 @@ class TransportConfig {
   /// Handler for connection approval (defaults to AutoApprovalHandler)
   final ConnectionApprovalHandler approvalHandler;
 
-  /// Optional device discovery mechanism
+  /// Optional device discovery mechanism (deprecated - now part of TransportProtocol)
+  @Deprecated('Device discovery is now handled by TransportProtocol')
   final DeviceDiscovery? deviceDiscovery;
 
   /// Optional policy for deciding which discovered devices to connect to

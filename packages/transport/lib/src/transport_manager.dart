@@ -37,7 +37,7 @@ class TransportManager {
 
   StreamSubscription<IncomingConnectionAttempt>? _incomingConnectionsSub;
   StreamSubscription<DiscoveredDevice>? _devicesDiscoveredSub;
-  StreamSubscription<DiscoveredDevice>? _devicesLostSub;
+  StreamSubscription<DeviceAddress>? _devicesLostSub;
   StreamSubscription<PeerStoreEvent>? _peerStoreSub;
 
   bool _isStarted = false;
@@ -76,7 +76,13 @@ class TransportManager {
       _handleIncomingConnection,
     );
 
-    // Set up device discovery if available
+    // Set up device discovery from transport protocol
+    _devicesDiscoveredSub = _config.protocol.devicesDiscovered.listen(
+      _handleDeviceDiscovered,
+    );
+    _devicesLostSub = _config.protocol.devicesLost.listen(_handleDeviceLost);
+
+    // Set up device discovery if available (legacy support)
     final discovery = _config.deviceDiscovery;
     if (discovery != null) {
       _devicesDiscoveredSub = discovery.devicesDiscovered.listen(
@@ -100,7 +106,11 @@ class TransportManager {
       // Start listening for connections
       await _config.protocol.startListening();
 
-      // Start device discovery if available
+      // Start device discovery from transport protocol
+      await _config.protocol.startDiscovery();
+
+      // Start device discovery if available (legacy support)
+      // TODO: remove this legacy support
       final discovery = _config.deviceDiscovery;
       if (discovery != null) {
         await discovery.startDiscovery();
@@ -135,7 +145,12 @@ class TransportManager {
     await Future.wait(disconnectFutures);
     _connections.clear();
 
-    // Stop device discovery
+    // Stop device discovery from transport protocol
+    if (_config.protocol.isDiscovering) {
+      await _config.protocol.stopDiscovery();
+    }
+
+    // Stop device discovery (legacy support)
     final discovery = _config.deviceDiscovery;
     if (discovery != null && discovery.isDiscovering) {
       await discovery.stopDiscovery();
@@ -525,9 +540,10 @@ class TransportManager {
   }
 
   /// Handle lost devices
-  void _handleDeviceLost(DiscoveredDevice device) {
+  void _handleDeviceLost(DeviceAddress deviceAddress) {
     // Device is no longer available - any existing connections will be
     // handled by the connection closed events
+    // TODO: perform cleanup actions for lost devices. Don't rely on the TransportConnection because it is deprecated.
   }
 
   /// Handle peer store events

@@ -10,16 +10,31 @@ class MockTransportProtocol implements TransportProtocol {
 
   final StreamController<IncomingConnectionAttempt> _incomingController =
       StreamController<IncomingConnectionAttempt>.broadcast();
+  final StreamController<DiscoveredDevice> _devicesDiscoveredController =
+      StreamController<DiscoveredDevice>.broadcast();
+  final StreamController<DeviceAddress> _devicesLostController =
+      StreamController<DeviceAddress>.broadcast();
 
   final Map<String, MockTransportConnection> _connections = {};
   bool _isListening = false;
+  bool _isDiscovering = false;
 
   @override
   bool get isListening => _isListening;
 
   @override
+  bool get isDiscovering => _isDiscovering;
+
+  @override
   Stream<IncomingConnectionAttempt> get incomingConnections =>
       _incomingController.stream;
+
+  @override
+  Stream<DiscoveredDevice> get devicesDiscovered =>
+      _devicesDiscoveredController.stream;
+
+  @override
+  Stream<DeviceAddress> get devicesLost => _devicesLostController.stream;
 
   @override
   Future<void> startListening() async {
@@ -29,6 +44,16 @@ class MockTransportProtocol implements TransportProtocol {
   @override
   Future<void> stopListening() async {
     _isListening = false;
+  }
+
+  @override
+  Future<void> startDiscovery() async {
+    _isDiscovering = true;
+  }
+
+  @override
+  Future<void> stopDiscovery() async {
+    _isDiscovering = false;
   }
 
   @override
@@ -47,8 +72,22 @@ class MockTransportProtocol implements TransportProtocol {
     _incomingController.add(attempt);
   }
 
+  void simulateDiscoveredDevice(DiscoveredDevice device) {
+    if (_isDiscovering) {
+      _devicesDiscoveredController.add(device);
+    }
+  }
+
+  void simulateDeviceLost(DeviceAddress deviceAddress) {
+    if (_isDiscovering) {
+      _devicesLostController.add(deviceAddress);
+    }
+  }
+
   Future<void> dispose() async {
     await _incomingController.close();
+    await _devicesDiscoveredController.close();
+    await _devicesLostController.close();
     for (final connection in _connections.values) {
       await connection.close();
     }
@@ -390,7 +429,6 @@ void main() {
       final config = TransportConfig(
         localPeerId: PeerId('test-peer'),
         protocol: mockProtocol,
-        deviceDiscovery: const NoOpDeviceDiscovery(),
         connectionPolicy: const ManualConnectPolicy(),
         peerStore: peerStore,
       );
@@ -565,7 +603,6 @@ void main() {
       final config = TransportConfig(
         localPeerId: PeerId('test-peer'),
         protocol: MockTransportProtocol(),
-        deviceDiscovery: const NoOpDeviceDiscovery(),
         connectionPolicy: const ManualConnectPolicy(),
       );
 
