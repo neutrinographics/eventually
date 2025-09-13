@@ -4,11 +4,12 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart' hide debugPrint;
 import 'package:eventually/eventually.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:transport/transport.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/chat_message.dart';
 import '../models/chat_peer.dart';
-import '../transports/chat_nearby_transport.dart';
+import '../transports/nearby_transport_protocol.dart';
 import 'hive_dag_store.dart';
 import 'permissions_service.dart';
 
@@ -32,17 +33,19 @@ class ChatService with ChangeNotifier {
 
   late final HiveDAGStore _store;
   late final DAG _dag;
-  late final ChatNearbyTransport _transport;
-
-  late final DefaultSynchronizer _synchronizer;
+  late final NearbyTransportProtocol _transportProtocol;
+  late final TransportManager _transportManager;
+  late final EventuallySynchronizer _synchronizer;
 
   final List<ChatMessage> _messages = [];
   final Map<PeerId, ChatPeer> _peers = {};
   final Map<PeerId, UserPresence> _userPresence = {};
 
   StreamSubscription<SyncEvent>? _syncEventSubscription;
-  StreamSubscription<PeerEvent>? _peerEventSubscription;
-  StreamSubscription<IncomingBytes>? _incomingBytesSubscription;
+  StreamSubscription<Peer>? _peerUpdatesSubscription;
+  StreamSubscription<TransportMessage>? _messagesReceivedSubscription;
+  StreamSubscription<ConnectionEvent>? _connectionEventSubscription;
+  StreamSubscription<DiscoveredDevice>? _discoveryEventSubscription;
   Timer? _presenceTimer;
 
   bool _isInitialized = false;
@@ -65,7 +68,9 @@ class ChatService with ChangeNotifier {
   int get messageCount => _messages.length;
   int get peerCount => _peers.length;
   int get onlinePeerCount => onlinePeers.length;
-  bool get hasConnectedPeers => _synchronizer.connectedPeers.isNotEmpty;
+  bool get hasConnectedPeers => _transportManager.peers
+      .where((p) => p.status == PeerStatus.connected)
+      .isNotEmpty;
 
   /// Sets the user name and saves it to preferences.
   Future<void> setUserName(String name) async {
@@ -107,33 +112,23 @@ class ChatService with ChangeNotifier {
       await _store.initialize();
       _dag = DAG();
 
-      // Initialize transport
-      _transport = ChatNearbyTransport(
-        nodeId: _userId!.value,
+      // Initialize transport protocol
+      _transportProtocol = NearbyTransportProtocol(
+        serviceId: 'eventually_chat',
         displayName: _userName!,
       );
 
-      // Initialize peer manager with transport
-      final config = PeerConfig(
-        nodeId: _userId!,
-        displayName: _userName!,
-        autoConnect: true,
-        maxConnections: 10,
-        connectionTimeout: const Duration(seconds: 8),
-        discoveryInterval: const Duration(seconds: 30),
-        enableHealthCheck: true,
-        healthCheckInterval: const Duration(seconds: 60),
+      // Initialize transport manager
+      final config = TransportConfig(
+        localPeerId: _userId!,
+        protocol: _transportProtocol,
       );
+      _transportManager = TransportManager(config);
 
-      // Initialize synchronizer - it will manage the peer manager internally
-      _synchronizer = DefaultSynchronizer(
-        store: _store,
-        dag: _dag,
-        transport: _transport,
-        config: config,
-      );
+      // Initialize synchronizer
+      _synchronizer = EventuallySynchronizer(store: _store, dag: _dag);
 
-      await _synchronizer.start();
+      await _synchronizer.initialize(_transportManager);
       await _loadExistingData();
       _setupEventListeners();
 
@@ -161,7 +156,7 @@ class ChatService with ChangeNotifier {
       _error = null;
       notifyListeners();
 
-      await _synchronizer.start();
+      await _transportManager.start();
 
       // Start announcing presence
       _startPresenceAnnouncement();
@@ -184,7 +179,7 @@ class ChatService with ChangeNotifier {
 
     try {
       _presenceTimer?.cancel();
-      await _synchronizer.stop();
+      await _transportManager.stop();
 
       _isStarted = false;
       debugPrint('🛑 Chat service stopped');
@@ -219,17 +214,13 @@ class ChatService with ChangeNotifier {
         replyToId: replyToCid,
       );
 
-      // Store the block
-      await _store.put(message.block);
-      _dag.addBlock(message.block);
+      // Add block to synchronizer (this will store it and add to DAG)
+      await _synchronizer.addBlock(message.block);
 
       // Add to local messages and notify
       _messages.add(message);
       _sortMessages();
       notifyListeners();
-
-      // Announce the new block to peers
-      await _synchronizer.announceBlocks({message.cid});
 
       debugPrint('📤 Message sent: ${message.content}');
     } catch (e, stackTrace) {
@@ -244,7 +235,7 @@ class ChatService with ChangeNotifier {
   /// Gets a message by its CID.
   ChatMessage? getMessageByCid(String cidString) {
     try {
-      return _messages.firstWhere((msg) => msg.cid == cidString);
+      return _messages.firstWhere((msg) => msg.cid.toString() == cidString);
     } catch (e) {
       return null;
     }
@@ -252,7 +243,7 @@ class ChatService with ChangeNotifier {
 
   /// Gets all messages from a specific user.
   List<ChatMessage> getMessagesFromUser(PeerId userId) {
-    return _messages.where((msg) => msg.senderId == userId).toList();
+    return _messages.where((msg) => msg.senderId == userId.value).toList();
   }
 
   /// Gets all replies to a specific message.
@@ -261,47 +252,53 @@ class ChatService with ChangeNotifier {
   }
 
   /// Gets synchronization statistics.
-  Future<SyncStats> getSyncStats() async {
-    return await _synchronizer.getStats();
+  SyncStats getSyncStats() {
+    return _synchronizer.stats;
   }
 
   /// Gets DAG statistics.
   Future<Map<String, dynamic>> getDAGStats() async {
-    final totalBlocks = await _store.getAllBlocks();
-    final rootBlocks = _dag.rootBlocks;
+    final allBlocks = <Block>[];
+    await for (final cid in _store.listCids()) {
+      final block = await _store.get(cid);
+      if (block != null) {
+        allBlocks.add(block);
+      }
+    }
+
+    final stats = _dag.calculateStats();
 
     return {
-      'total_blocks': totalBlocks.length,
-      'root_blocks': rootBlocks.length,
+      'total_blocks': allBlocks.length,
+      'root_blocks': stats.rootBlocks,
       'messages': _messages.length,
+      'total_size': stats.totalSize,
+      'max_depth': stats.maxDepth,
+      'avg_depth': stats.averageDepth,
     };
-  }
-
-  /// Gets peer statistics.
-  Future<PeerStats> getPeerStats() async {
-    return await _synchronizer.getPeerStats();
   }
 
   /// Gets transport connection statistics.
   Map<String, dynamic> getConnectionStats() {
+    final connectedCount = _transportManager.peers
+        .where((p) => p.status == PeerStatus.connected)
+        .length;
+    final discoveredCount = _transportManager.peers.length;
+
     return {
-      'connected_peers': _transport.connectedUserCount,
-      'discovered_peers': _transport.discoveredPeers.length,
-      'transport_ready': _transport.isReady,
+      'connected_peers': connectedCount,
+      'discovered_peers': discoveredCount,
+      'transport_ready': _transportManager.isStarted,
     };
   }
 
   /// Manually discovers peers.
-  Future<List<TransportDevice>> discoverPeers() async {
+  Future<void> discoverPeers() async {
     try {
-      final peers = await _transport.discoverDevices(
-        timeout: const Duration(seconds: 5),
-      );
-      debugPrint('🔍 Discovered ${peers.length} peers');
-      return peers;
+      await _transportProtocol.startDiscovery();
+      debugPrint('🔍 Started peer discovery');
     } catch (e) {
       debugPrint('❌ Discovery failed: $e');
-      return [];
     }
   }
 
@@ -332,12 +329,19 @@ class ChatService with ChangeNotifier {
 
   Future<void> _loadExistingData() async {
     try {
-      final allBlocks = await _store.getAllBlocks();
-      debugPrint('📦 Loading ${allBlocks.length} existing blocks');
+      final allCids = <CID>[];
+      await for (final cid in _store.listCids()) {
+        allCids.add(cid);
+      }
 
-      for (final block in allBlocks) {
-        _dag.addBlock(block);
-        await _processBlock(block);
+      debugPrint('📦 Loading ${allCids.length} existing blocks');
+
+      for (final cid in allCids) {
+        final block = await _store.get(cid);
+        if (block != null) {
+          _dag.addBlock(block);
+          await _processBlock(block);
+        }
       }
 
       _sortMessages();
@@ -354,89 +358,101 @@ class ChatService with ChangeNotifier {
       onError: (e) => debugPrint('Sync event error: $e'),
     );
 
-    // Listen to peer events
-    _peerEventSubscription = _synchronizer.peerEvents.listen(
-      _handlePeerEvent,
-      onError: (e) => debugPrint('Peer event error: $e'),
+    // Listen to peer updates
+    _peerUpdatesSubscription = _transportManager.peerUpdates.listen(
+      _handlePeerUpdate,
+      onError: (e) => debugPrint('Peer update error: $e'),
     );
 
-    // Listen to incoming bytes for direct transport handling if needed
-    _incomingBytesSubscription = _transport.incomingBytes.listen((
-      incomingBytes,
-    ) {
-      // This is handled by the peer manager, but we can log it
-      debugPrint(
-        '📨 Received ${incomingBytes.bytes.length} bytes from ${incomingBytes.device.displayName}',
-      );
-    }, onError: (e) => debugPrint('Incoming bytes error: $e'));
+    // Listen to received messages (handled by synchronizer, but we can log them)
+    _messagesReceivedSubscription = _transportManager.messagesReceived.listen(
+      _handleReceivedMessage,
+      onError: (e) => debugPrint('Message received error: $e'),
+    );
+
+    // Listen to connection events
+    _connectionEventSubscription = _transportProtocol.connectionEvents.listen(
+      _handleConnectionEvent,
+      onError: (e) => debugPrint('Connection event error: $e'),
+    );
+
+    // Listen to discovery events
+    _discoveryEventSubscription = _transportProtocol.devicesDiscovered.listen(
+      _handleDeviceDiscovered,
+      onError: (e) => debugPrint('Discovery event error: $e'),
+    );
   }
 
   void _handleSyncEvent(SyncEvent event) {
     switch (event) {
-      case SyncStarted(peer: final peer):
-        debugPrint('🔄 Sync started with ${peer.displayName}');
+      case BlocksAnnounced(cids: final cids):
+        debugPrint('📢 Announced ${cids.length} blocks');
         break;
-      case SyncCompleted(result: final result):
-        debugPrint(
-          '✅ Sync completed with ${result.peer.displayName}: '
-          '${result.blocksReceived} blocks received',
-        );
-        _processSyncResult(result);
+      case BlocksRequested(cids: final cids):
+        debugPrint('📞 Requested ${cids.length} blocks');
         break;
-      case SyncFailed(peer: final peer, error: final error):
+      case BlockReceived(cid: final cid, fromPeer: final peer):
         debugPrint(
-          '❌ Sync failed with ${peer?.displayName ?? "unknown"}: $error',
+          '📥 Received block ${cid.toString().substring(0, 8)}... from ${peer.value}',
         );
+        _processReceivedBlock(cid);
         break;
-      case BlocksDiscovered(blocks: final blocks, peer: final peer):
-        debugPrint(
-          '📦 Discovered ${blocks.length} blocks from ${peer.displayName}',
-        );
-        break;
-      case BlocksFetched(blocks: final blocks, peer: final peer):
-        debugPrint(
-          '📥 Fetched ${blocks.length} blocks from ${peer.displayName}',
-        );
-        _processNewBlocks(blocks.toList());
+      case SyncError(error: final error):
+        debugPrint('❌ Sync error: $error');
         break;
     }
   }
 
-  void _handlePeerEvent(PeerEvent event) {
-    switch (event) {
-      case PeerConnected(peer: final peer):
-        debugPrint('🤝 Peer connected: ${peer.displayName}');
-        _addOrUpdatePeer(peer);
+  void _handlePeerUpdate(Peer peer) {
+    debugPrint('👤 Peer update: ${peer.id.value} - ${peer.status}');
+
+    _addOrUpdatePeer(peer);
+
+    switch (peer.status) {
+      case PeerStatus.connected:
         _updatePeerPresence(peer.id, UserPresence.online);
         break;
-      case PeerDiscovered(peer: final peer):
-        debugPrint('👋 Peer discovered: ${peer.displayName}');
-        _addOrUpdatePeer(peer);
-        break;
-      case PeerDisconnected(peer: final peer):
-        debugPrint('👋 Peer disconnected: ${peer.displayName}');
+      case PeerStatus.disconnected:
+      case PeerStatus.failed:
         _updatePeerPresence(peer.id, UserPresence.offline);
         break;
-      case MessageReceived(message: final message, peer: final peer):
-        debugPrint('📨 Message received from ${peer.displayName}');
+      default:
+        // For discovered, connecting, disconnecting - keep current status
         break;
     }
+
     notifyListeners();
   }
 
-  void _processSyncResult(SyncResult result) {
-    if (result.success && result.blocksReceived > 0) {
-      // Blocks were added during sync, refresh our message list
-      _reloadMessagesFromDAG();
+  void _handleReceivedMessage(TransportMessage message) {
+    // Messages are handled by the synchronizer, but we can log them
+    debugPrint('📨 Received message from ${message.senderId.value}');
+  }
+
+  void _handleConnectionEvent(ConnectionEvent event) {
+    switch (event.type) {
+      case ConnectionEventType.connected:
+        debugPrint('✅ Connected to device: ${event.address.value}');
+        break;
+      case ConnectionEventType.disconnected:
+        debugPrint('❌ Disconnected from device: ${event.address.value}');
+        break;
     }
   }
 
-  Future<void> _processNewBlocks(List<Block> blocks) async {
-    for (final block in blocks) {
+  void _handleDeviceDiscovered(DiscoveredDevice device) {
+    debugPrint('👀 Discovered device: ${device.displayName}');
+    // Device discovery is now handled automatically by the transport manager
+    // Peers will appear in the peerUpdates stream once handshake is complete
+  }
+
+  Future<void> _processReceivedBlock(CID cid) async {
+    final block = await _store.get(cid);
+    if (block != null) {
       await _processBlock(block);
+      _sortMessages();
+      notifyListeners();
     }
-    _sortMessages();
-    notifyListeners();
   }
 
   Future<void> _processBlock(Block block) async {
@@ -481,19 +497,22 @@ class ChatService with ChangeNotifier {
     }
   }
 
-  void _addOrUpdatePeer(Peer peer) {
+  void _addOrUpdatePeer(Peer transportPeer) {
+    final displayName =
+        transportPeer.metadata['displayName'] as String? ?? 'Unknown';
+
     final chatPeer =
-        _peers[peer.id] ??
+        _peers[transportPeer.id] ??
         ChatPeer(
-          id: peer.id,
-          name: peer.displayName,
+          id: transportPeer.id,
+          name: displayName,
           isOnline: false,
           lastSeen: DateTime.now(),
         );
 
-    _peers[peer.id] = chatPeer.copyWith(
-      name: peer.displayName,
-      isOnline: peer.isActive,
+    _peers[transportPeer.id] = chatPeer.copyWith(
+      name: displayName,
+      isOnline: transportPeer.status == PeerStatus.connected,
       lastSeen: DateTime.now(),
     );
   }
@@ -522,23 +541,10 @@ class ChatService with ChangeNotifier {
         utf8.encode(jsonEncode(presenceData)),
       );
       final block = Block.fromData(dataBytes);
-      await _store.put(block);
-      _dag.addBlock(block);
-      await _synchronizer.announceBlocks({block.cid});
+      await _synchronizer.addBlock(block);
     } catch (e) {
       debugPrint('⚠️ Failed to announce presence: $e');
     }
-  }
-
-  Future<void> _reloadMessagesFromDAG() async {
-    _messages.clear();
-    final allBlocks = await _store.getAllBlocks();
-
-    for (final block in allBlocks) {
-      await _processBlock(block);
-    }
-
-    _sortMessages();
   }
 
   void _sortMessages() {
@@ -548,14 +554,16 @@ class ChatService with ChangeNotifier {
   @override
   Future<void> dispose() async {
     await _syncEventSubscription?.cancel();
-    await _peerEventSubscription?.cancel();
-    await _incomingBytesSubscription?.cancel();
+    await _peerUpdatesSubscription?.cancel();
+    await _messagesReceivedSubscription?.cancel();
+    await _connectionEventSubscription?.cancel();
+    await _discoveryEventSubscription?.cancel();
     _presenceTimer?.cancel();
 
     if (_isInitialized) {
       await stop();
-
-      await _synchronizer.stop();
+      await _synchronizer.dispose();
+      await _transportManager.dispose();
       await _store.close();
     }
 

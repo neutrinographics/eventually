@@ -1,4 +1,5 @@
 import 'package:eventually/eventually.dart';
+import 'package:transport/transport.dart';
 
 /// Represents a peer in the chat system.
 ///
@@ -24,23 +25,43 @@ class ChatPeer {
   }) : connectedAt = connectedAt ?? DateTime.now(),
        knownBlocks = knownBlocks ?? <CID>{};
 
-  /// Creates a peer from an Eventually library Peer object.
-  factory ChatPeer.fromPeer(
-    Peer peer, {
-    required String name,
+  /// Creates a peer from a transport library Peer object.
+  factory ChatPeer.fromTransportPeer(
+    Peer transportPeer, {
+    String? name,
     ChatPeerStatus? status,
     bool? isOnline,
     DateTime? lastSeen,
     Set<CID>? knownBlocks,
   }) {
+    final displayName =
+        name ?? transportPeer.metadata['displayName'] as String? ?? 'Unknown';
+
     return ChatPeer(
-      id: peer.id,
-      name: name,
-      status: status ?? ChatPeerStatus.connected,
-      isOnline: isOnline ?? true,
-      lastSeen: lastSeen,
+      id: transportPeer.id,
+      name: displayName,
+      status: status ?? _mapPeerStatus(transportPeer.status),
+      isOnline: isOnline ?? (transportPeer.status == PeerStatus.connected),
+      lastSeen: lastSeen ?? transportPeer.lastSeen,
       knownBlocks: knownBlocks,
     );
+  }
+
+  /// Maps transport peer status to chat peer status
+  static ChatPeerStatus _mapPeerStatus(PeerStatus transportStatus) {
+    switch (transportStatus) {
+      case PeerStatus.discovered:
+        return ChatPeerStatus.discovered;
+      case PeerStatus.connecting:
+        return ChatPeerStatus.connecting;
+      case PeerStatus.connected:
+        return ChatPeerStatus.connected;
+      case PeerStatus.disconnecting:
+      case PeerStatus.disconnected:
+        return ChatPeerStatus.disconnected;
+      case PeerStatus.failed:
+        return ChatPeerStatus.failed;
+    }
   }
 
   /// Creates a copy of this peer with updated properties.

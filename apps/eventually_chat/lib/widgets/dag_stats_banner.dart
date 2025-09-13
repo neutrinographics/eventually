@@ -34,7 +34,7 @@ class _DAGStatsBannerState extends State<DAGStatsBanner> {
 
     try {
       final chatService = Provider.of<ChatService>(context, listen: false);
-      final stats = await chatService.getConnectionStats();
+      final stats = chatService.getConnectionStats();
       if (mounted) {
         setState(() {
           _stats = stats;

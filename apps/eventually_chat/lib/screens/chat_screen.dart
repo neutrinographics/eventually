@@ -292,7 +292,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   itemCount: chatService.messages.length,
                   itemBuilder: (context, index) {
                     final message = chatService.messages[index];
-                    final isMe = message.senderId == chatService.userId;
+                    final isMe = message.senderId == chatService.userId?.value;
 
                     return MessageBubble(message: message, isMe: isMe);
                   },
