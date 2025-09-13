@@ -295,7 +295,7 @@ class ChatService with ChangeNotifier {
   /// Manually discovers peers.
   Future<void> discoverPeers() async {
     try {
-      await _transportProtocol.startDiscovery();
+      await _transportProtocol.startDiscovering();
       debugPrint('🔍 Started peer discovery');
     } catch (e) {
       debugPrint('❌ Discovery failed: $e');

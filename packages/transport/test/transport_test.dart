@@ -21,7 +21,7 @@ class MockTransportProtocol implements TransportProtocol {
   bool _isDiscovering = false;
 
   @override
-  bool get isListening => _isListening;
+  bool get isAdvertising => _isListening;
 
   @override
   bool get isDiscovering => _isDiscovering;
@@ -51,12 +51,12 @@ class MockTransportProtocol implements TransportProtocol {
   }
 
   @override
-  Future<void> startDiscovery() async {
+  Future<void> startDiscovering() async {
     _isDiscovering = true;
   }
 
   @override
-  Future<void> stopDiscovery() async {
+  Future<void> stopDiscovering() async {
     _isDiscovering = false;
   }
 
@@ -342,11 +342,11 @@ void main() {
 
       await transport.start();
       expect(transport.isStarted, isTrue);
-      expect(mockProtocol.isListening, isTrue);
+      expect(mockProtocol.isAdvertising, isTrue);
 
       await transport.stop();
       expect(transport.isStarted, isFalse);
-      expect(mockProtocol.isListening, isFalse);
+      expect(mockProtocol.isAdvertising, isFalse);
     });
 
     test('loads peers from store on start', () async {

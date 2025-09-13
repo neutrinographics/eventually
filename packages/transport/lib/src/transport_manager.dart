@@ -88,7 +88,7 @@ class TransportManager {
     try {
       // Start listening and discovery
       await _config.protocol.startAdvertising();
-      await _config.protocol.startDiscovery();
+      await _config.protocol.startDiscovering();
 
       // Load existing peers from store
       final store = _config.peerStore;
@@ -114,9 +114,9 @@ class TransportManager {
 
     // Stop protocol operations
     if (_config.protocol.isDiscovering) {
-      await _config.protocol.stopDiscovery();
+      await _config.protocol.stopDiscovering();
     }
-    if (_config.protocol.isListening) {
+    if (_config.protocol.isAdvertising) {
       await _config.protocol.stopAdvertising();
     }
 
@@ -371,7 +371,7 @@ class TransportManager {
     if (policy != null) {
       final shouldConnect = await policy.shouldConnectToDevice(device);
       if (shouldConnect) {
-        await connectToPeer(device.address);
+        await _config.protocol.connectToDevice(device.address);
       }
     }
   }

@@ -61,7 +61,7 @@ class NearbyTransportProtocol implements TransportProtocol {
   bool get isDiscovering => _isDiscovering;
 
   @override
-  bool get isListening => _isListening;
+  bool get isAdvertising => _isListening;
 
   @override
   Future<bool> sendToAddress(DeviceAddress address, Uint8List data) async {
@@ -89,7 +89,7 @@ class NearbyTransportProtocol implements TransportProtocol {
   }
 
   @override
-  Future<void> startDiscovery() async {
+  Future<void> startDiscovering() async {
     if (_isDiscovering) {
       debugPrint('⚠️ Discovery already running');
       return;
@@ -142,7 +142,7 @@ class NearbyTransportProtocol implements TransportProtocol {
   }
 
   @override
-  Future<void> stopDiscovery() async {
+  Future<void> stopDiscovering() async {
     if (!_isDiscovering) {
       debugPrint('⚠️ Discovery not running');
       return;
@@ -186,7 +186,7 @@ class NearbyTransportProtocol implements TransportProtocol {
   /// Dispose of resources and close streams
   Future<void> dispose() async {
     await stopAdvertising();
-    await stopDiscovery();
+    await stopDiscovering();
 
     if (!_incomingDataController.isClosed) {
       await _incomingDataController.close();
@@ -366,17 +366,9 @@ class NearbyTransportProtocol implements TransportProtocol {
     }
   }
 
-  // Helper methods
-
-  /// Find the endpoint ID for a given device address
-  String? _findEndpointIdForAddress(DeviceAddress address) {
-    // In our implementation, the device address value is the endpoint ID
-    return address.value;
-  }
-
-  /// Request connection to a discovered device
-  /// This is useful for initiating connections manually
-  Future<void> requestConnection(DeviceAddress address) async {
+  /// Request connection to a discovered device.
+  @override
+  Future<void> connectToDevice(DeviceAddress address) async {
     final endpointId = address.value;
 
     if (_connectedEndpoints.containsKey(endpointId)) {
@@ -398,14 +390,5 @@ class NearbyTransportProtocol implements TransportProtocol {
       debugPrint('❌ Failed to request connection to $endpointId: $e');
       throw Exception('Failed to request connection: $e');
     }
-  }
-
-  /// Get list of currently connected device addresses
-  List<DeviceAddress> get connectedDevices =>
-      _connectedEndpoints.values.toList();
-
-  /// Check if connected to a specific device
-  bool isConnectedTo(DeviceAddress address) {
-    return _connectedEndpoints.containsKey(address.value);
   }
 }

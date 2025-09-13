@@ -14,13 +14,16 @@ abstract interface class TransportProtocol {
   Future<void> stopAdvertising();
 
   /// Start discovering devices on the network
-  Future<void> startDiscovery();
+  Future<void> startDiscovering();
 
   /// Stop discovering devices on the network
-  Future<void> stopDiscovery();
+  Future<void> stopDiscovering();
+
+  /// Connect to a device.
+  Future<void> connectToDevice(DeviceAddress address);
 
   /// Send data directly to a device address
-  /// Returns true if the data was sent successfully, false otherwise
+  /// Returns true if the data was sent successfully, false otherwise.
   Future<bool> sendToAddress(DeviceAddress address, Uint8List data);
 
   /// Stream of incoming data with sender address information
@@ -29,14 +32,15 @@ abstract interface class TransportProtocol {
   /// Stream of connection events (connected/disconnected from addresses)
   Stream<ConnectionEvent> get connectionEvents;
 
-  /// Stream of newly discovered devices
+  /// Stream of newly discovered devices.
+  /// You must [connect] to a discovered device before you can communicate with it.
   Stream<DiscoveredDevice> get devicesDiscovered;
 
   /// Stream of devices that are no longer available
   Stream<DeviceAddress> get devicesLost;
 
   /// Whether this transport is currently listening for connections
-  bool get isListening;
+  bool get isAdvertising;
 
   /// Whether discovery is currently active
   bool get isDiscovering;
