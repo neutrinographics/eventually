@@ -522,7 +522,11 @@ class TransportManager {
       final recipientId = PeerId(String.fromCharCodes(recipientBytes));
 
       // Read timestamp
-      final timestampMs = data.buffer.asByteData().getInt64(offset);
+      final timestampMs = ByteData.sublistView(
+        data,
+        offset,
+        offset + 8,
+      ).getInt64(0);
       offset += 8;
       final timestamp = DateTime.fromMillisecondsSinceEpoch(timestampMs);
 
@@ -536,6 +540,7 @@ class TransportManager {
         timestamp: timestamp,
       );
     } catch (e) {
+      // TODO: log error.
       return null;
     }
   }
