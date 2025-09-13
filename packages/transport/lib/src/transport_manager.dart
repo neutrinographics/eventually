@@ -463,7 +463,6 @@ class TransportManager {
     final result = Uint8List(
       3 +
           1 +
-          1 +
           senderBytes.length +
           1 +
           recipientBytes.length +
