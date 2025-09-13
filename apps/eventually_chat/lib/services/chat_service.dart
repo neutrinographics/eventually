@@ -283,11 +283,26 @@ class ChatService with ChangeNotifier {
         .where((p) => p.status == PeerStatus.connected)
         .length;
     final discoveredCount = _transportManager.peers.length;
+    final syncStats = _synchronizer.stats;
+
+    // Calculate sync success rate (simplified metric)
+    final totalSyncs =
+        syncStats.totalBlocksReceived + syncStats.totalBlocksSent;
+    final successRate = totalSyncs > 0
+        ? 1.0
+        : 0.0; // Assume all completed syncs are successful
 
     return {
       'connected_peers': connectedCount,
       'discovered_peers': discoveredCount,
       'transport_ready': _transportManager.isStarted,
+      // Network statistics for DAG stats banner
+      'onlinePeerCount': connectedCount,
+      'syncCount': totalSyncs,
+      'syncSuccessRate': successRate,
+      'blocksReceived': syncStats.totalBlocksReceived,
+      'blocksSent': syncStats.totalBlocksSent,
+      'lastSyncTime': syncStats.lastSyncTime?.toIso8601String(),
     };
   }
 
