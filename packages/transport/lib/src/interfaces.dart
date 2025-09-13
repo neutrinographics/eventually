@@ -7,11 +7,11 @@ import 'default_implementations.dart';
 /// Abstract interface for low-level transport protocols (e.g., TCP, WebSocket, Bluetooth)
 /// Includes connection management, device discovery, and direct data transmission
 abstract interface class TransportProtocol {
-  /// Start listening for incoming connections
-  Future<void> startListening();
+  /// Start advertising local peer on the network.
+  Future<void> startAdvertising();
 
-  /// Stop listening for incoming connections
-  Future<void> stopListening();
+  /// Stop advertising local peer on the network.
+  Future<void> stopAdvertising();
 
   /// Start discovering devices on the network
   Future<void> startDiscovery();
@@ -261,7 +261,7 @@ class TransportConfig {
     required this.protocol,
     this.handshakeProtocol = const JsonHandshakeProtocol(),
     this.approvalHandler = const AutoApprovalHandler(),
-    this.connectionPolicy,
+    this.connectionPolicy = const AutoConnectPolicy(),
     this.peerStore,
     this.handshakeTimeout = const Duration(seconds: 10),
   });

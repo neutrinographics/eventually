@@ -87,7 +87,7 @@ class TransportManager {
 
     try {
       // Start listening and discovery
-      await _config.protocol.startListening();
+      await _config.protocol.startAdvertising();
       await _config.protocol.startDiscovery();
 
       // Load existing peers from store
@@ -117,7 +117,7 @@ class TransportManager {
       await _config.protocol.stopDiscovery();
     }
     if (_config.protocol.isListening) {
-      await _config.protocol.stopListening();
+      await _config.protocol.stopAdvertising();
     }
 
     // Clear pending handshakes

@@ -67,19 +67,19 @@ class NearbyTransportProtocol implements TransportProtocol {
   Future<bool> sendToAddress(DeviceAddress address, Uint8List data) async {
     try {
       // Find the endpoint ID for this address
-      final endpointId = _findEndpointIdForAddress(address);
-      if (endpointId == null) {
-        debugPrint('❌ No endpoint found for address: ${address.value}');
-        return false;
-      }
+      // final endpointId = _findEndpointIdForAddress(address);
+      // if (endpointId == null) {
+      //   debugPrint('❌ No endpoint found for address: ${address.value}');
+      //   return false;
+      // }
 
       // Check if we're connected to this endpoint
-      if (!_connectedEndpoints.containsKey(endpointId)) {
-        debugPrint('❌ Not connected to endpoint: $endpointId');
+      if (!_connectedEndpoints.containsKey(address.value)) {
+        debugPrint('❌ Not connected to endpoint: ${address.value}');
         return false;
       }
 
-      await Nearby().sendBytesPayload(endpointId, data);
+      await Nearby().sendBytesPayload(address.value, data);
       debugPrint('✅ Sent ${data.length} bytes to ${address.value}');
       return true;
     } catch (e) {
@@ -117,9 +117,9 @@ class NearbyTransportProtocol implements TransportProtocol {
   }
 
   @override
-  Future<void> startListening() async {
+  Future<void> startAdvertising() async {
     if (_isListening) {
-      debugPrint('⚠️ Already listening');
+      debugPrint('⚠️ Already advertising');
       return;
     }
 
@@ -159,9 +159,9 @@ class NearbyTransportProtocol implements TransportProtocol {
   }
 
   @override
-  Future<void> stopListening() async {
+  Future<void> stopAdvertising() async {
     if (!_isListening) {
-      debugPrint('⚠️ Not listening');
+      debugPrint('⚠️ Not advertising');
       return;
     }
 
@@ -185,7 +185,7 @@ class NearbyTransportProtocol implements TransportProtocol {
 
   /// Dispose of resources and close streams
   Future<void> dispose() async {
-    await stopListening();
+    await stopAdvertising();
     await stopDiscovery();
 
     if (!_incomingDataController.isClosed) {

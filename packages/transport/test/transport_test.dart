@@ -41,12 +41,12 @@ class MockTransportProtocol implements TransportProtocol {
   Stream<DeviceAddress> get devicesLost => _devicesLostController.stream;
 
   @override
-  Future<void> startListening() async {
+  Future<void> startAdvertising() async {
     _isListening = true;
   }
 
   @override
-  Future<void> stopListening() async {
+  Future<void> stopAdvertising() async {
     _isListening = false;
   }
 
