@@ -169,6 +169,7 @@ class TransportManager {
 
       for (final device in transportDevices) {
         // Check if this is a new device we haven't seen before
+        // TODO: there should be some expiration of known transport devices if a peer was never established.
         if (!_knownTransportDevices.contains(device.address)) {
           _knownTransportDevices.add(device.address);
 

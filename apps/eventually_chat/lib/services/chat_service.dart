@@ -120,6 +120,7 @@ class ChatService with ChangeNotifier {
       final config = TransportConfig(
         localPeerId: _userId!,
         protocol: _transportProtocol,
+        discoveryInterval: const Duration(seconds: 5),
       );
       _transportManager = TransportManager(config);
 
