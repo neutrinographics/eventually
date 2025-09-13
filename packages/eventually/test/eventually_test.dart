@@ -244,6 +244,39 @@ void main() {
       expect(bytes, isNotEmpty);
     });
 
+    test('Have message encoding/decoding preserves CIDs', () {
+      // Create test CIDs using identity hash
+      final cid1Data = Uint8List.fromList([1, 2, 3]);
+      final cid1Hash = Multihash.fromDigest(MultiHashCode.identity, cid1Data);
+      final cid1 = CID.v1(codec: MultiCodec.raw, multihash: cid1Hash);
+
+      final cid2Data = Uint8List.fromList([4, 5, 6]);
+      final cid2Hash = Multihash.fromDigest(MultiHashCode.identity, cid2Data);
+      final cid2 = CID.v1(codec: MultiCodec.raw, multihash: cid2Hash);
+
+      final originalCids = {cid1, cid2};
+
+      // Create Have message
+      final have = Have(cids: originalCids);
+      expect(have.cids, equals(originalCids));
+
+      // Encode to bytes
+      final bytes = have.toBytes();
+      expect(bytes, isNotEmpty);
+
+      // Decode from bytes
+      final decoded = SyncMessageCodec.decode(bytes);
+      expect(decoded, isA<Have>());
+
+      final decodedHave = decoded as Have;
+      expect(decodedHave.cids, hasLength(2));
+
+      // Verify CIDs are preserved (order might differ in sets)
+      expect(decodedHave.cids.contains(cid1), isTrue);
+      expect(decodedHave.cids.contains(cid2), isTrue);
+      expect(decodedHave.cids, equals(originalCids));
+    });
+
     test('creates block response', () {
       final data = Uint8List.fromList([1, 2, 3]);
       final hash = Multihash.fromDigest(MultiHashCode.identity, data);

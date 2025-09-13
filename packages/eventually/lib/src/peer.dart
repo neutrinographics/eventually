@@ -106,8 +106,15 @@ final class Have extends SyncMessage {
     final buffer = <int>[...typeBytes, 0x00];
 
     for (final cid in cids) {
-      buffer.addAll(cid.bytes);
-      buffer.add(0x00); // separator
+      final cidBytes = cid.bytes;
+      // Add CID length as 4-byte big-endian integer, then CID bytes
+      buffer.addAll([
+        (cidBytes.length >> 24) & 0xFF,
+        (cidBytes.length >> 16) & 0xFF,
+        (cidBytes.length >> 8) & 0xFF,
+        cidBytes.length & 0xFF,
+      ]);
+      buffer.addAll(cidBytes);
     }
 
     return Uint8List.fromList(buffer);
@@ -138,8 +145,15 @@ final class Want extends SyncMessage {
     final buffer = <int>[...typeBytes, 0x00];
 
     for (final cid in cids) {
-      buffer.addAll(cid.bytes);
-      buffer.add(0x00); // separator
+      final cidBytes = cid.bytes;
+      // Add CID length as 4-byte big-endian integer, then CID bytes
+      buffer.addAll([
+        (cidBytes.length >> 24) & 0xFF,
+        (cidBytes.length >> 16) & 0xFF,
+        (cidBytes.length >> 8) & 0xFF,
+        cidBytes.length & 0xFF,
+      ]);
+      buffer.addAll(cidBytes);
     }
 
     return Uint8List.fromList(buffer);
@@ -161,23 +175,26 @@ class SyncMessageCodec {
     if (bytes.isEmpty) return null;
 
     try {
-      // Simple decoding based on message type
-      final string = String.fromCharCodes(bytes);
-      final parts = string.split('\x00');
+      // Find the first null byte to separate type from data
+      int typeEnd = 0;
+      while (typeEnd < bytes.length && bytes[typeEnd] != 0) {
+        typeEnd++;
+      }
 
-      if (parts.isEmpty) return null;
+      if (typeEnd == bytes.length) return null;
 
-      final type = parts[0];
+      final type = String.fromCharCodes(bytes.sublist(0, typeEnd));
+      final dataBytes = bytes.sublist(typeEnd + 1);
 
       switch (type) {
         case 'have':
-          return _decodeHave(parts);
+          return _decodeHave(dataBytes);
         case 'want':
-          return _decodeWant(parts);
+          return _decodeWant(dataBytes);
         case 'block_request':
-          return _decodeBlockRequest(parts);
+          return _decodeBlockRequest(dataBytes);
         case 'block_response':
-          return _decodeBlockResponse(parts);
+          return _decodeBlockResponse(dataBytes);
         default:
           return null;
       }
@@ -186,54 +203,100 @@ class SyncMessageCodec {
     }
   }
 
-  static Have? _decodeHave(List<String> parts) {
-    if (parts.length < 2) return null;
+  static Have? _decodeHave(Uint8List dataBytes) {
+    if (dataBytes.isEmpty) return Have(cids: {});
 
     final cids = <CID>{};
-    for (int i = 1; i < parts.length; i++) {
-      if (parts[i].isNotEmpty) {
-        try {
-          cids.add(CID.parse(parts[i]));
-        } catch (e) {
-          // Skip invalid CIDs
-        }
+    int offset = 0;
+
+    while (offset + 4 < dataBytes.length) {
+      // Read CID length as 4-byte big-endian integer
+      final cidLength =
+          (dataBytes[offset] << 24) |
+          (dataBytes[offset + 1] << 16) |
+          (dataBytes[offset + 2] << 8) |
+          dataBytes[offset + 3];
+      offset += 4;
+
+      if (offset + cidLength > dataBytes.length) break;
+
+      try {
+        final cidBytes = dataBytes.sublist(offset, offset + cidLength);
+        final cid = CID.fromBytes(cidBytes);
+        cids.add(cid);
+      } catch (e) {
+        // Skip invalid CIDs
       }
+
+      offset += cidLength;
     }
 
     return Have(cids: cids);
   }
 
-  static Want? _decodeWant(List<String> parts) {
-    if (parts.length < 2) return null;
+  static Want? _decodeWant(Uint8List dataBytes) {
+    if (dataBytes.isEmpty) return Want(cids: {});
 
     final cids = <CID>{};
-    for (int i = 1; i < parts.length; i++) {
-      if (parts[i].isNotEmpty) {
-        try {
-          cids.add(CID.parse(parts[i]));
-        } catch (e) {
-          // Skip invalid CIDs
-        }
+    int offset = 0;
+
+    while (offset + 4 < dataBytes.length) {
+      // Read CID length as 4-byte big-endian integer
+      final cidLength =
+          (dataBytes[offset] << 24) |
+          (dataBytes[offset + 1] << 16) |
+          (dataBytes[offset + 2] << 8) |
+          dataBytes[offset + 3];
+      offset += 4;
+
+      if (offset + cidLength > dataBytes.length) break;
+
+      try {
+        final cidBytes = dataBytes.sublist(offset, offset + cidLength);
+        final cid = CID.fromBytes(cidBytes);
+        cids.add(cid);
+      } catch (e) {
+        // Skip invalid CIDs
       }
+
+      offset += cidLength;
     }
 
     return Want(cids: cids);
   }
 
-  static BlockRequest? _decodeBlockRequest(List<String> parts) {
-    if (parts.length < 2) return null;
+  static BlockRequest? _decodeBlockRequest(Uint8List dataBytes) {
+    if (dataBytes.isEmpty) return null;
 
     try {
-      final cid = CID.parse(parts[1]);
+      final cid = CID.fromBytes(dataBytes);
       return BlockRequest(cid: cid);
     } catch (e) {
       return null;
     }
   }
 
-  static BlockResponse? _decodeBlockResponse(List<String> parts) {
-    // This would need more sophisticated parsing for the block data
-    // For now, return null
-    return null;
+  static BlockResponse? _decodeBlockResponse(Uint8List dataBytes) {
+    if (dataBytes.isEmpty) return null;
+
+    try {
+      // Find the first null separator between CID and block data
+      int cidEnd = 0;
+      while (cidEnd < dataBytes.length && dataBytes[cidEnd] != 0) {
+        cidEnd++;
+      }
+
+      if (cidEnd >= dataBytes.length) return null;
+
+      final cidBytes = dataBytes.sublist(0, cidEnd);
+      final blockData = dataBytes.sublist(cidEnd + 1);
+
+      final cid = CID.fromBytes(cidBytes);
+      final block = Block.withCid(cid, blockData);
+
+      return BlockResponse(block: block);
+    } catch (e) {
+      return null;
+    }
   }
 }
