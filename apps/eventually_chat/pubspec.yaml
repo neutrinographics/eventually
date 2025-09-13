@@ -17,6 +17,8 @@ dependencies:
 
   eventually:
     path: ../../packages/eventually
+  transport:
+    path: ../../packages/transport
   uuid: ^4.4.2
   shared_preferences: ^2.2.2
   provider: ^6.1.1
