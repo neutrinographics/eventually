@@ -1,5 +1,20 @@
 import 'dart:typed_data';
 
+/// Exception thrown by transport protocol operations
+class TransportException implements Exception {
+  const TransportException(this.message, {this.cause});
+
+  /// The error message
+  final String message;
+
+  /// The underlying cause of the exception, if any
+  final Object? cause;
+
+  @override
+  String toString() =>
+      'TransportException: $message${cause != null ? ' (caused by: $cause)' : ''}';
+}
+
 class TransportDevice {
   /// Network address where this device can be reached
   final DeviceAddress address;
@@ -256,93 +271,4 @@ class TransportMessage {
 
   @override
   String toString() => 'TransportMessage(from: $senderId, to: $recipientId)';
-}
-
-/// Result of a connection attempt
-enum ConnectionResult {
-  /// Connection was successful
-  success,
-
-  /// Connection was rejected by the remote peer
-  rejected,
-
-  /// Connection failed due to network or protocol error
-  failed,
-
-  /// Connection timed out
-  timeout,
-
-  /// Connection was cancelled
-  cancelled,
-}
-
-/// Information about a connection attempt result
-class ConnectionAttemptResult {
-  const ConnectionAttemptResult({
-    required this.peerId,
-    required this.result,
-    this.error,
-    this.metadata = const {},
-  });
-
-  /// The peer that was being connected to
-  final PeerId peerId;
-
-  /// The result of the connection attempt
-  final ConnectionResult result;
-
-  /// Error information if the connection failed
-  final String? error;
-
-  /// Additional metadata about the connection attempt
-  final Map<String, dynamic> metadata;
-
-  @override
-  String toString() =>
-      'ConnectionAttemptResult(peer: $peerId, result: $result)';
-}
-
-/// Represents an incoming connection request from a peer
-class ConnectionRequest {
-  const ConnectionRequest({
-    required this.peerId,
-    required this.address,
-    required this.timestamp,
-    this.metadata = const {},
-  });
-
-  /// ID of the peer requesting connection
-  final PeerId peerId;
-
-  /// Address of the requesting peer
-  final DeviceAddress address;
-
-  /// When the connection request was received
-  final DateTime timestamp;
-
-  /// Additional metadata from the connection request
-  final Map<String, dynamic> metadata;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is ConnectionRequest &&
-          runtimeType == other.runtimeType &&
-          peerId == other.peerId &&
-          timestamp == other.timestamp;
-
-  @override
-  int get hashCode => Object.hash(peerId, timestamp);
-
-  @override
-  String toString() => 'ConnectionRequest(peer: $peerId, from: $address)';
-}
-
-/// Response to a connection request
-enum ConnectionRequestResponse {
-  /// Accept the connection request
-  accept,
-
-  /// Reject the connection request
-  reject,
 }

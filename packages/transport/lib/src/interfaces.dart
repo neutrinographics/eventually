@@ -22,9 +22,6 @@ abstract interface class TransportProtocol {
   /// should not be used.
   Future<void> shutdown();
 
-  /// Connect to a device.
-  // Future<void> connectToDevice(DeviceAddress address);
-
   /// Send data directly to a device address
   /// Throws [TransportException] if the operation fails or times out.
   Future<void> sendData(
@@ -145,53 +142,6 @@ class HandshakeResult {
   final Map<String, dynamic> metadata;
 }
 
-/// Abstract interface for approving or rejecting connection requests
-abstract interface class ConnectionApprovalHandler {
-  /// Decide whether to approve a connection request
-  Future<ConnectionRequestResponse> handleConnectionRequest(
-    ConnectionRequest request,
-  );
-}
-
-/// A simple auto-approval handler that always accepts connections
-class AutoApprovalHandler implements ConnectionApprovalHandler {
-  const AutoApprovalHandler();
-
-  @override
-  Future<ConnectionRequestResponse> handleConnectionRequest(
-    ConnectionRequest request,
-  ) async {
-    return ConnectionRequestResponse.accept;
-  }
-}
-
-/// A handler that always rejects connections
-class RejectAllHandler implements ConnectionApprovalHandler {
-  const RejectAllHandler();
-
-  @override
-  Future<ConnectionRequestResponse> handleConnectionRequest(
-    ConnectionRequest request,
-  ) async {
-    return ConnectionRequestResponse.reject;
-  }
-}
-
-/// A handler that requires manual approval through a callback
-class ManualApprovalHandler implements ConnectionApprovalHandler {
-  const ManualApprovalHandler(this.approvalCallback);
-
-  final Future<ConnectionRequestResponse> Function(ConnectionRequest)
-  approvalCallback;
-
-  @override
-  Future<ConnectionRequestResponse> handleConnectionRequest(
-    ConnectionRequest request,
-  ) {
-    return approvalCallback(request);
-  }
-}
-
 /// Interface for storing and retrieving peer information
 abstract interface class PeerStore {
   /// Add or update a peer in the store
@@ -231,54 +181,15 @@ class PeerRemoved extends PeerStoreEvent {
   const PeerRemoved(super.peer);
 }
 
-/// Interface for deciding which discovered devices to connect to
-abstract interface class ConnectionPolicy {
-  /// Whether to automatically connect to this discovered device
-  Future<bool> shouldConnectToDevice(DiscoveredDevice device);
-}
-
-/// Auto-connect to all discovered devices
-class AutoConnectPolicy implements ConnectionPolicy {
-  const AutoConnectPolicy();
-
-  @override
-  Future<bool> shouldConnectToDevice(DiscoveredDevice device) async {
-    return true;
-  }
-}
-
-/// Never auto-connect to discovered devices
-class ManualConnectPolicy implements ConnectionPolicy {
-  const ManualConnectPolicy();
-
-  @override
-  Future<bool> shouldConnectToDevice(DiscoveredDevice device) async {
-    return false;
-  }
-}
-
-/// Use a callback to decide which devices to connect to
-class PolicyBasedConnectionPolicy implements ConnectionPolicy {
-  const PolicyBasedConnectionPolicy(this.shouldConnect);
-
-  final Future<bool> Function(DiscoveredDevice) shouldConnect;
-
-  @override
-  Future<bool> shouldConnectToDevice(DiscoveredDevice device) {
-    return shouldConnect(device);
-  }
-}
-
 /// Configuration for the transport manager
 class TransportConfig {
   const TransportConfig({
     required this.localPeerId,
     required this.protocol,
     this.handshakeProtocol = const JsonHandshakeProtocol(),
-    this.approvalHandler = const AutoApprovalHandler(),
-    this.connectionPolicy = const AutoConnectPolicy(),
     this.peerStore,
     this.handshakeTimeout = const Duration(seconds: 10),
+    this.discoveryInterval = const Duration(seconds: 30),
   });
 
   /// The local peer ID
@@ -290,15 +201,12 @@ class TransportConfig {
   /// The handshake protocol to use (defaults to JsonHandshakeProtocol)
   final HandshakeProtocol handshakeProtocol;
 
-  /// Handler for connection approval (defaults to AutoApprovalHandler)
-  final ConnectionApprovalHandler approvalHandler;
-
-  /// Optional policy for deciding which discovered devices to connect to
-  final ConnectionPolicy? connectionPolicy;
-
   /// Optional peer store for persistence
   final PeerStore? peerStore;
 
   /// Timeout for handshake operations
   final Duration handshakeTimeout;
+
+  /// How often to discover devices (defaults to 30 seconds)
+  final Duration discoveryInterval;
 }

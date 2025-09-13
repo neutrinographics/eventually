@@ -43,9 +43,7 @@ class ChatService with ChangeNotifier {
 
   StreamSubscription<SyncEvent>? _syncEventSubscription;
   StreamSubscription<Peer>? _peerUpdatesSubscription;
-  StreamSubscription<TransportMessage>? _messagesReceivedSubscription;
-  StreamSubscription<ConnectionEvent>? _connectionEventSubscription;
-  StreamSubscription<DiscoveredDevice>? _discoveryEventSubscription;
+  StreamSubscription<TransportMessage>? _messageSubscription;
   Timer? _presenceTimer;
 
   bool _isInitialized = false;
@@ -115,7 +113,7 @@ class ChatService with ChangeNotifier {
       // Initialize transport protocol
       _transportProtocol = NearbyTransportProtocol(
         serviceId: 'eventually_chat',
-        displayName: _userName!,
+        userName: _userName!,
       );
 
       // Initialize transport manager
@@ -295,8 +293,8 @@ class ChatService with ChangeNotifier {
   /// Manually discovers peers.
   Future<void> discoverPeers() async {
     try {
-      await _transportProtocol.startDiscovering();
-      debugPrint('🔍 Started peer discovery');
+      // Discovery is now automatic and periodic
+      debugPrint('🔍 Peer discovery is automatic in new transport design');
     } catch (e) {
       debugPrint('❌ Discovery failed: $e');
     }
@@ -365,22 +363,13 @@ class ChatService with ChangeNotifier {
     );
 
     // Listen to received messages (handled by synchronizer, but we can log them)
-    _messagesReceivedSubscription = _transportManager.messagesReceived.listen(
+    // Listen to messages received
+    _messageSubscription = _transportManager.messagesReceived.listen(
       _handleReceivedMessage,
       onError: (e) => debugPrint('Message received error: $e'),
     );
 
-    // Listen to connection events
-    _connectionEventSubscription = _transportProtocol.connectionEvents.listen(
-      _handleConnectionEvent,
-      onError: (e) => debugPrint('Connection event error: $e'),
-    );
-
-    // Listen to discovery events
-    _discoveryEventSubscription = _transportProtocol.devicesDiscovered.listen(
-      _handleDeviceDiscovered,
-      onError: (e) => debugPrint('Discovery event error: $e'),
-    );
+    // Note: Connection and discovery events are now handled internally by TransportManager
   }
 
   void _handleSyncEvent(SyncEvent event) {
@@ -427,23 +416,6 @@ class ChatService with ChangeNotifier {
   void _handleReceivedMessage(TransportMessage message) {
     // Messages are handled by the synchronizer, but we can log them
     debugPrint('📨 Received message from ${message.senderId.value}');
-  }
-
-  void _handleConnectionEvent(ConnectionEvent event) {
-    switch (event.type) {
-      case ConnectionEventType.connected:
-        debugPrint('✅ Connected to device: ${event.address.value}');
-        break;
-      case ConnectionEventType.disconnected:
-        debugPrint('❌ Disconnected from device: ${event.address.value}');
-        break;
-    }
-  }
-
-  void _handleDeviceDiscovered(DiscoveredDevice device) {
-    debugPrint('👀 Discovered device: ${device.displayName}');
-    // Device discovery is now handled automatically by the transport manager
-    // Peers will appear in the peerUpdates stream once handshake is complete
   }
 
   Future<void> _processReceivedBlock(CID cid) async {
@@ -555,9 +527,7 @@ class ChatService with ChangeNotifier {
   Future<void> dispose() async {
     await _syncEventSubscription?.cancel();
     await _peerUpdatesSubscription?.cancel();
-    await _messagesReceivedSubscription?.cancel();
-    await _connectionEventSubscription?.cancel();
-    await _discoveryEventSubscription?.cancel();
+    await _messageSubscription?.cancel();
     _presenceTimer?.cancel();
 
     if (_isInitialized) {

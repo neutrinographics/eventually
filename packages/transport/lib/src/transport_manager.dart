@@ -4,8 +4,8 @@ import 'dart:typed_data';
 import 'interfaces.dart';
 import 'models.dart';
 
-/// A simplified transport manager that works with the new direct data transmission model
-/// This eliminates the need for TransportConnection objects and simplifies the API
+/// A transport manager that periodically discovers connected transport devices
+/// and performs handshakes to establish peer relationships
 class TransportManager {
   TransportManager(this._config) {
     _initialize();
@@ -18,19 +18,14 @@ class TransportManager {
       StreamController<Peer>.broadcast();
   final StreamController<TransportMessage> _messageController =
       StreamController<TransportMessage>.broadcast();
-  final StreamController<ConnectionRequest> _connectionRequestController =
-      StreamController<ConnectionRequest>.broadcast();
-  final StreamController<ConnectionAttemptResult> _connectionResultController =
-      StreamController<ConnectionAttemptResult>.broadcast();
 
   // Internal state
   final Map<PeerId, Peer> _peers = {};
   final Map<String, PendingHandshake> _pendingHandshakes = {};
+  final Set<DeviceAddress> _knownTransportDevices = {};
 
   StreamSubscription<IncomingData>? _incomingDataSub;
-  StreamSubscription<ConnectionEvent>? _connectionEventsSub;
-  StreamSubscription<DiscoveredDevice>? _devicesDiscoveredSub;
-  StreamSubscription<DeviceAddress>? _devicesLostSub;
+  Timer? _discoveryTimer;
 
   bool _isStarted = false;
   bool _isDisposed = false;
@@ -40,14 +35,6 @@ class TransportManager {
 
   /// Stream of messages received from peers
   Stream<TransportMessage> get messagesReceived => _messageController.stream;
-
-  /// Stream of connection requests (for approval/rejection)
-  Stream<ConnectionRequest> get connectionRequests =>
-      _connectionRequestController.stream;
-
-  /// Stream of connection attempt results
-  Stream<ConnectionAttemptResult> get connectionResults =>
-      _connectionResultController.stream;
 
   /// Get current peers
   List<Peer> get peers => _peers.values.toList();
@@ -61,24 +48,14 @@ class TransportManager {
   /// Local peer ID
   PeerId get localPeerId => _config.localPeerId;
 
+  /// Discovery interval
+  Duration get discoveryInterval => _config.discoveryInterval;
+
   void _initialize() {
     // Listen for incoming data
     _incomingDataSub = _config.protocol.incomingData.listen(
       _handleIncomingData,
     );
-
-    // Listen for connection events
-    _connectionEventsSub = _config.protocol.connectionEvents.listen(
-      _handleConnectionEvent,
-    );
-
-    // Listen for discovered devices
-    _devicesDiscoveredSub = _config.protocol.devicesDiscovered.listen(
-      _handleDeviceDiscovered,
-    );
-
-    // Listen for lost devices
-    _devicesLostSub = _config.protocol.devicesLost.listen(_handleDeviceLost);
   }
 
   /// Start the transport manager
@@ -86,7 +63,7 @@ class TransportManager {
     if (_isStarted || _isDisposed) return;
 
     try {
-      // Start listening and discovery
+      // Initialize the transport protocol
       await _config.protocol.initialize();
 
       // Load existing peers from store
@@ -98,6 +75,9 @@ class TransportManager {
           _peerUpdatesController.add(peer);
         }
       }
+
+      // Start periodic device discovery
+      _startPeriodicDiscovery();
 
       _isStarted = true;
     } catch (e) {
@@ -111,11 +91,20 @@ class TransportManager {
     if (!_isStarted || _isDisposed) return;
     _isStarted = false;
 
-    // Stop protocol operations
-    await _config.protocol.shutdown();
+    // Stop periodic discovery
+    _discoveryTimer?.cancel();
+    _discoveryTimer = null;
 
-    // Clear pending handshakes
+    // Shutdown transport protocol
+    try {
+      await _config.protocol.shutdown();
+    } catch (e) {
+      print('❌ Error shutting down transport protocol: $e');
+    }
+
+    // Clear state
     _pendingHandshakes.clear();
+    _knownTransportDevices.clear();
 
     // Update all peers to disconnected
     for (final peer in _peers.values) {
@@ -134,15 +123,10 @@ class TransportManager {
 
     // Cancel subscriptions
     await _incomingDataSub?.cancel();
-    await _connectionEventsSub?.cancel();
-    await _devicesDiscoveredSub?.cancel();
-    await _devicesLostSub?.cancel();
 
     // Close controllers
     await _peerUpdatesController.close();
     await _messageController.close();
-    await _connectionRequestController.close();
-    await _connectionResultController.close();
   }
 
   /// Send a message to a peer
@@ -154,23 +138,74 @@ class TransportManager {
       return false;
     }
 
-    // Serialize message with protocol marker
-    final messageData = _serializeMessage(message);
+    try {
+      // Serialize message with protocol marker
+      final messageData = _serializeMessage(message);
 
-    // Send directly to peer's address
-    return await _config.protocol.sendData(peer.address, messageData);
+      // Send directly to peer's address
+      await _config.protocol.sendData(peer.address, messageData);
+      return true;
+    } catch (e) {
+      print('❌ Failed to send message to ${message.recipientId.value}: $e');
+      return false;
+    }
   }
 
-  /// Connect to a peer by address (initiate handshake)
-  Future<ConnectionAttemptResult> connectToPeer(DeviceAddress address) async {
-    if (!_isStarted || _isDisposed) {
-      return ConnectionAttemptResult(
-        peerId: PeerId('unknown'),
-        result: ConnectionResult.failed,
-        error: 'Transport manager not started',
-      );
-    }
+  void _startPeriodicDiscovery() {
+    // Do initial discovery
+    _performDiscovery();
 
+    // Set up periodic discovery
+    _discoveryTimer = Timer.periodic(discoveryInterval, (_) {
+      _performDiscovery();
+    });
+  }
+
+  Future<void> _performDiscovery() async {
+    if (!_isStarted || _isDisposed) return;
+
+    try {
+      final transportDevices = await _config.protocol.discoverDevices();
+
+      for (final device in transportDevices) {
+        // Check if this is a new device we haven't seen before
+        if (!_knownTransportDevices.contains(device.address)) {
+          _knownTransportDevices.add(device.address);
+
+          // Check if we already have a peer for this address
+          if (_findPeerByAddress(device.address) == null) {
+            // No peer exists, initiate handshake
+            _initiateHandshakeWithDevice(device);
+          }
+        }
+      }
+
+      // Remove devices that are no longer available
+      final currentAddresses = transportDevices.map((d) => d.address).toSet();
+      final removedAddresses = _knownTransportDevices.difference(
+        currentAddresses,
+      );
+
+      for (final removedAddress in removedAddresses) {
+        _knownTransportDevices.remove(removedAddress);
+        final peerId = _findPeerByAddress(removedAddress);
+        if (peerId != null) {
+          _updatePeerStatus(peerId, PeerStatus.disconnected);
+        }
+      }
+    } catch (e) {
+      print('❌ Device discovery failed: $e');
+    }
+  }
+
+  Future<void> _initiateHandshakeWithDevice(TransportDevice device) async {
+    await _initiateHandshakeWithAddress(device.address);
+    print(
+      '🤝 Initiated handshake with ${device.displayName} (${device.address.value})',
+    );
+  }
+
+  Future<void> _initiateHandshakeWithAddress(DeviceAddress address) async {
     try {
       // Create handshake ID for tracking
       final handshakeId =
@@ -194,48 +229,19 @@ class TransportManager {
       final markedData = _markAsHandshake(handshakeData, handshakeId);
 
       // Send handshake
-      final success = await _config.protocol.sendData(address, markedData);
-      if (!success) {
-        _pendingHandshakes.remove(handshakeId);
-        return ConnectionAttemptResult(
-          peerId: PeerId('unknown'),
-          result: ConnectionResult.failed,
-          error: 'Failed to send handshake',
-        );
-      }
+      await _config.protocol.sendData(address, markedData);
 
-      // Wait for handshake response with timeout
-      final completer = Completer<ConnectionAttemptResult>();
+      // Set up timeout
       Timer(_config.handshakeTimeout, () {
-        if (!completer.isCompleted) {
-          _pendingHandshakes.remove(handshakeId);
-          completer.complete(
-            ConnectionAttemptResult(
-              peerId: PeerId('unknown'),
-              result: ConnectionResult.timeout,
-              error: 'Handshake timeout',
-            ),
-          );
+        final pendingHandshake = _pendingHandshakes.remove(handshakeId);
+        if (pendingHandshake != null) {
+          print('⏰ Handshake timeout with ${address.value}');
         }
       });
 
-      // Store the completer for when we get the response
-      pending.completer = completer;
-      return completer.future;
+      print('🤝 Initiated handshake with ${address.value}');
     } catch (e) {
-      return ConnectionAttemptResult(
-        peerId: PeerId('unknown'),
-        result: ConnectionResult.failed,
-        error: e.toString(),
-      );
-    }
-  }
-
-  /// Disconnect from a peer
-  Future<void> disconnectFromPeer(PeerId peerId) async {
-    final peer = _peers[peerId];
-    if (peer != null) {
-      _updatePeerStatus(peerId, PeerStatus.disconnected);
+      print('❌ Failed to initiate handshake with ${address.value}: $e');
     }
   }
 
@@ -268,14 +274,6 @@ class TransportManager {
                 _config.localPeerId,
               );
 
-          final connectionResult = ConnectionAttemptResult(
-            peerId: result.remotePeerId ?? PeerId('unknown'),
-            result: result.success
-                ? ConnectionResult.success
-                : ConnectionResult.failed,
-            error: result.error,
-          );
-
           if (result.success && result.remotePeerId != null) {
             _createPeer(
               result.remotePeerId!,
@@ -283,9 +281,6 @@ class TransportManager {
               result.metadata,
             );
           }
-
-          pending.completer?.complete(connectionResult);
-          _connectionResultController.add(connectionResult);
         }
       } else {
         // This is an incoming handshake request
@@ -298,41 +293,29 @@ class TransportManager {
         if (result.success && result.remotePeerId != null) {
           final remotePeerId = result.remotePeerId!;
 
-          // Check approval
-          final request = ConnectionRequest(
-            peerId: remotePeerId,
-            address: incomingData.fromAddress,
-            timestamp: incomingData.timestamp,
-          );
-          _connectionRequestController.add(request);
+          // Auto-accept all connections in the new design
+          _createPeer(remotePeerId, incomingData.fromAddress, result.metadata);
 
-          final approval = await _config.approvalHandler
-              .handleConnectionRequest(request);
-          if (approval == ConnectionRequestResponse.accept) {
-            // Create peer
-            _createPeer(
-              remotePeerId,
-              incomingData.fromAddress,
-              result.metadata,
+          // Send response if provided
+          final responseData = result.metadata['response_data'] as Uint8List?;
+          if (responseData != null && handshakeId != null) {
+            final markedResponse = _markAsHandshakeResponse(
+              responseData,
+              handshakeId,
             );
-
-            // Send response if provided
-            final responseData = result.metadata['response_data'] as Uint8List?;
-            if (responseData != null && handshakeId != null) {
-              final markedResponse = _markAsHandshakeResponse(
-                responseData,
-                handshakeId,
-              );
+            try {
               await _config.protocol.sendData(
                 incomingData.fromAddress,
                 markedResponse,
               );
+            } catch (e) {
+              print('❌ Failed to send handshake response: $e');
             }
           }
         }
       }
     } catch (e) {
-      print('Handshake error: $e');
+      print('❌ Handshake error: $e');
     }
   }
 
@@ -344,43 +327,7 @@ class TransportManager {
         _messageController.add(message);
       }
     } catch (e) {
-      print('Message deserialization error: $e');
-    }
-  }
-
-  /// Handle connection events
-  void _handleConnectionEvent(ConnectionEvent event) {
-    final peerId = _findPeerByAddress(event.address);
-    if (peerId != null) {
-      final newStatus = event.type == ConnectionEventType.connected
-          ? PeerStatus.connected
-          : PeerStatus.disconnected;
-      _updatePeerStatus(peerId, newStatus);
-    } else {
-      connectToPeer(event.address).then((result) {
-        if (result.result != ConnectionResult.success) {
-          print('Auto-handshake failed for ${event.address}: ${result.error}');
-        }
-      });
-    }
-  }
-
-  /// Handle discovered devices
-  void _handleDeviceDiscovered(DiscoveredDevice device) async {
-    final policy = _config.connectionPolicy;
-    if (policy != null) {
-      final shouldConnect = await policy.shouldConnectToDevice(device);
-      if (shouldConnect) {
-        await _config.protocol.connectToDevice(device.address);
-      }
-    }
-  }
-
-  /// Handle lost devices
-  void _handleDeviceLost(DeviceAddress address) {
-    final peerId = _findPeerByAddress(address);
-    if (peerId != null) {
-      _updatePeerStatus(peerId, PeerStatus.disconnected);
+      print('❌ Message deserialization error: $e');
     }
   }
 
@@ -406,6 +353,8 @@ class TransportManager {
     if (store != null) {
       store.storePeer(peer);
     }
+
+    print('🎉 Created peer: ${peerId.value} at ${address.value}');
   }
 
   /// Update peer status
@@ -424,6 +373,8 @@ class TransportManager {
       if (store != null) {
         store.storePeer(updatedPeer);
       }
+
+      print('📊 Updated peer ${peerId.value} status: $status');
     }
   }
 
@@ -447,26 +398,32 @@ class TransportManager {
   /// Mark data as handshake
   Uint8List _markAsHandshake(Uint8List data, String handshakeId) {
     final idBytes = Uint8List.fromList(handshakeId.codeUnits);
-    final result = Uint8List(3 + 1 + idBytes.length + data.length);
+    final result = Uint8List(
+      3 + 1 + idBytes.length + 1 + data.length,
+    ); // +1 for null terminator
     result[0] = 0x48; // Handshake marker 'H'
     result[1] = 0x53; // 'S'
     result[2] = 0x4B; // 'K'
     result[3] = 0x00; // Request flag
     result.setRange(4, 4 + idBytes.length, idBytes);
-    result.setRange(4 + idBytes.length, result.length, data);
+    result[4 + idBytes.length] = 0x00; // Null terminator
+    result.setRange(4 + idBytes.length + 1, result.length, data);
     return result;
   }
 
   /// Mark data as handshake response
   Uint8List _markAsHandshakeResponse(Uint8List data, String handshakeId) {
     final idBytes = Uint8List.fromList(handshakeId.codeUnits);
-    final result = Uint8List(3 + 1 + idBytes.length + data.length);
+    final result = Uint8List(
+      3 + 1 + idBytes.length + 1 + data.length,
+    ); // +1 for null terminator
     result[0] = 0x48; // Handshake marker 'H'
     result[1] = 0x53; // 'S'
     result[2] = 0x4B; // 'K'
     result[3] = 0x01; // Response flag
     result.setRange(4, 4 + idBytes.length, idBytes);
-    result.setRange(4 + idBytes.length, result.length, data);
+    result[4 + idBytes.length] = 0x00; // Null terminator
+    result.setRange(4 + idBytes.length + 1, result.length, data);
     return result;
   }
 
@@ -474,7 +431,7 @@ class TransportManager {
   Map<String, dynamic> _extractHandshakeData(Uint8List data) {
     final isResponse = data[3] == 0x01;
 
-    // Find the handshake ID (null-terminated or until data starts)
+    // Find the handshake ID (null-terminated)
     var idEnd = 4;
     while (idEnd < data.length && data[idEnd] != 0) {
       idEnd++;
@@ -597,5 +554,4 @@ class PendingHandshake {
   final DeviceAddress address;
   final bool isInitiator;
   final DateTime timestamp;
-  Completer<ConnectionAttemptResult>? completer;
 }

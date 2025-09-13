@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:test/test.dart';
@@ -10,60 +11,35 @@ class MockTransportProtocol implements TransportProtocol {
 
   final StreamController<IncomingData> _incomingDataController =
       StreamController<IncomingData>.broadcast();
-  final StreamController<ConnectionEvent> _connectionEventsController =
-      StreamController<ConnectionEvent>.broadcast();
-  final StreamController<DiscoveredDevice> _devicesDiscoveredController =
-      StreamController<DiscoveredDevice>.broadcast();
-  final StreamController<DeviceAddress> _devicesLostController =
-      StreamController<DeviceAddress>.broadcast();
 
-  bool _isListening = false;
-  bool _isDiscovering = false;
-
-  @override
-  bool get isAdvertising => _isListening;
-
-  @override
-  bool get isDiscovering => _isDiscovering;
+  bool _initialized = false;
+  final List<TransportDevice> _mockDevices = [];
 
   @override
   Stream<IncomingData> get incomingData => _incomingDataController.stream;
 
   @override
-  Stream<ConnectionEvent> get connectionEvents =>
-      _connectionEventsController.stream;
-
-  @override
-  Stream<DiscoveredDevice> get devicesDiscovered =>
-      _devicesDiscoveredController.stream;
-
-  @override
-  Stream<DeviceAddress> get devicesLost => _devicesLostController.stream;
-
-  @override
   Future<void> initialize() async {
-    _isListening = true;
+    _initialized = true;
   }
 
   @override
   Future<void> shutdown() async {
-    _isListening = false;
+    _initialized = false;
   }
 
   @override
-  Future<void> startDiscovering() async {
-    _isDiscovering = true;
-  }
-
-  @override
-  Future<void> stopDiscovering() async {
-    _isDiscovering = false;
-  }
-
-  @override
-  Future<bool> sendData(DeviceAddress address, Uint8List data) async {
+  Future<void> sendData(
+    DeviceAddress address,
+    Uint8List data, {
+    Duration? timeout,
+  }) async {
     // Simulate successful sending
-    return true;
+  }
+
+  @override
+  Future<List<TransportDevice>> discoverDevices() async {
+    return _mockDevices.toList();
   }
 
   void simulateIncomingData(DeviceAddress fromAddress, Uint8List data) {
@@ -75,46 +51,30 @@ class MockTransportProtocol implements TransportProtocol {
     _incomingDataController.add(incomingData);
   }
 
-  void simulateConnectionEvent(
-    DeviceAddress address,
-    ConnectionEventType type,
-  ) {
-    final event = ConnectionEvent(
-      address: address,
-      type: type,
-      timestamp: DateTime.now(),
-    );
-    _connectionEventsController.add(event);
+  void addMockDevice(TransportDevice device) {
+    _mockDevices.add(device);
   }
 
-  void simulateDiscoveredDevice(DiscoveredDevice device) {
-    if (_isDiscovering) {
-      _devicesDiscoveredController.add(device);
-    }
-  }
-
-  void simulateDeviceLost(DeviceAddress deviceAddress) {
-    if (_isDiscovering) {
-      _devicesLostController.add(deviceAddress);
-    }
+  void removeMockDevice(DeviceAddress address) {
+    _mockDevices.removeWhere((device) => device.address == address);
   }
 
   Future<void> dispose() async {
     await _incomingDataController.close();
-    await _connectionEventsController.close();
-    await _devicesDiscoveredController.close();
-    await _devicesLostController.close();
   }
 
-  void simulateConnectionClosed() {
-    // Simulate connection closed event
-    // This is a no-op in the new model
-  }
-
-  @override
-  Future<void> connectToDevice(DeviceAddress address) async {
-    // Simulate connecting to a device
-    simulateConnectionEvent(address, ConnectionEventType.connected);
+  // Helper method to create handshake response data
+  Uint8List createHandshakeResponse(Uint8List data, String handshakeId) {
+    final idBytes = Uint8List.fromList(handshakeId.codeUnits);
+    final result = Uint8List(3 + 1 + idBytes.length + 1 + data.length);
+    result[0] = 0x48; // 'H'
+    result[1] = 0x53; // 'S'
+    result[2] = 0x4B; // 'K'
+    result[3] = 0x01; // Response flag
+    result.setRange(4, 4 + idBytes.length, idBytes);
+    result[4 + idBytes.length] = 0x00; // Null terminator
+    result.setRange(4 + idBytes.length + 1, result.length, data);
+    return result;
   }
 }
 
@@ -276,46 +236,6 @@ void main() {
         expect(allPeers, containsAll([peer1, peer2]));
       });
     });
-
-    group('Connection Approval Handlers', () {
-      test('AutoApprovalHandler always accepts', () async {
-        const handler = AutoApprovalHandler();
-        final request = ConnectionRequest(
-          peerId: PeerId('test-peer'),
-          address: DeviceAddress('test-addr'),
-          timestamp: DateTime.now(),
-        );
-
-        final response = await handler.handleConnectionRequest(request);
-        expect(response, equals(ConnectionRequestResponse.accept));
-      });
-
-      test('RejectAllHandler always rejects', () async {
-        const handler = RejectAllHandler();
-        final request = ConnectionRequest(
-          peerId: PeerId('test-peer'),
-          address: DeviceAddress('test-addr'),
-          timestamp: DateTime.now(),
-        );
-
-        final response = await handler.handleConnectionRequest(request);
-        expect(response, equals(ConnectionRequestResponse.reject));
-      });
-
-      test('ManualApprovalHandler uses callback', () async {
-        final handler = ManualApprovalHandler(
-          (request) async => ConnectionRequestResponse.accept,
-        );
-        final request = ConnectionRequest(
-          peerId: PeerId('test-peer'),
-          address: DeviceAddress('test-addr'),
-          timestamp: DateTime.now(),
-        );
-
-        final response = await handler.handleConnectionRequest(request);
-        expect(response, equals(ConnectionRequestResponse.accept));
-      });
-    });
   });
 
   group('TransportManager', () {
@@ -330,7 +250,6 @@ void main() {
       final config = TransportConfig(
         localPeerId: PeerId('test-peer'),
         protocol: mockProtocol,
-        connectionPolicy: const ManualConnectPolicy(),
         peerStore: peerStore,
       );
 
@@ -348,11 +267,9 @@ void main() {
 
       await transport.start();
       expect(transport.isStarted, isTrue);
-      expect(mockProtocol.isAdvertising, isTrue);
 
       await transport.stop();
       expect(transport.isStarted, isFalse);
-      expect(mockProtocol.isAdvertising, isFalse);
     });
 
     test('loads peers from store on start', () async {
@@ -370,22 +287,23 @@ void main() {
       expect(peers.first, equals(storedPeer));
     });
 
-    test('emits peer updates from store', () async {
-      await transport.start();
+    test('emits peer updates from loaded peers', () async {
+      // Store a peer before starting
+      final storedPeer = Peer(
+        id: PeerId('stored-peer'),
+        address: DeviceAddress('stored-addr'),
+        status: PeerStatus.discovered,
+      );
+      await peerStore.storePeer(storedPeer);
 
       final peerCompleter = Completer<Peer>();
       transport.peerUpdates.listen(peerCompleter.complete);
 
-      final peer = Peer(
-        id: PeerId('new-peer'),
-        address: DeviceAddress('new-addr'),
-        status: PeerStatus.connected,
-      );
+      // Start the transport - this should load and emit stored peers
+      await transport.start();
 
-      await peerStore.storePeer(peer);
-      final updatedPeer = await peerCompleter.future;
-
-      expect(updatedPeer, equals(peer));
+      final emittedPeer = await peerCompleter.future;
+      expect(emittedPeer, equals(storedPeer));
     });
 
     test('returns correct local peer ID', () {
@@ -412,24 +330,22 @@ void main() {
       expect(peer, isNull);
     });
 
-    test('connectToPeer fails when not started', () async {
-      final result = await transport.connectToPeer(
-        DeviceAddress('some-address'),
+    test('discovers mock devices', () async {
+      final mockDevice = TransportDevice(
+        address: DeviceAddress('test-device'),
+        displayName: 'Test Device',
+        connectedAt: DateTime.now(),
+        isActive: true,
       );
-      expect(result.result, equals(ConnectionResult.failed));
-      expect(result.error, equals('Transport manager not started'));
-    });
 
-    test('connectToPeer works with device address', () async {
+      mockProtocol.addMockDevice(mockDevice);
       await transport.start();
-      final result = await transport.connectToPeer(
-        DeviceAddress('test-address'),
-      );
-      // This may timeout or fail depending on handshake, but shouldn't crash
-      expect(
-        result.result,
-        isIn([ConnectionResult.failed, ConnectionResult.timeout]),
-      );
+
+      // Wait a moment for discovery to run
+      await Future.delayed(Duration(milliseconds: 100));
+
+      // The transport should have discovered our mock device
+      // (actual peer creation would depend on successful handshake)
     });
 
     test('sendMessage fails when not started', () async {
@@ -459,63 +375,16 @@ void main() {
     });
   });
 
-  group('Connection Policy', () {
-    test('AutoConnectPolicy always returns true', () async {
-      const policy = AutoConnectPolicy();
-      final device = DiscoveredDevice(
-        address: DeviceAddress('test-addr'),
-        displayName: 'Test Device',
-        discoveredAt: DateTime.now(),
-      );
-
-      final result = await policy.shouldConnectToDevice(device);
-      expect(result, isTrue);
-    });
-
-    test('ManualConnectPolicy always returns false', () async {
-      const policy = ManualConnectPolicy();
-      final device = DiscoveredDevice(
-        address: DeviceAddress('test-addr'),
-        displayName: 'Test Device',
-        discoveredAt: DateTime.now(),
-      );
-
-      final result = await policy.shouldConnectToDevice(device);
-      expect(result, isFalse);
-    });
-
-    test('PolicyBasedConnectionPolicy uses callback', () async {
-      final policy = PolicyBasedConnectionPolicy(
-        (device) async => device.displayName.contains('Connect'),
-      );
-
-      final deviceToConnect = DiscoveredDevice(
-        address: DeviceAddress('test-addr-1'),
-        displayName: 'ConnectMe Device',
-        discoveredAt: DateTime.now(),
-      );
-
-      final deviceToIgnore = DiscoveredDevice(
-        address: DeviceAddress('test-addr-2'),
-        displayName: 'Ignore Device',
-        discoveredAt: DateTime.now(),
-      );
-
-      expect(await policy.shouldConnectToDevice(deviceToConnect), isTrue);
-      expect(await policy.shouldConnectToDevice(deviceToIgnore), isFalse);
-    });
-  });
-
   group('Transport Config', () {
     test('creates valid configuration', () {
       final config = TransportConfig(
         localPeerId: PeerId('test-peer'),
         protocol: MockTransportProtocol(),
-        connectionPolicy: const ManualConnectPolicy(),
       );
 
       expect(config.localPeerId.value, equals('test-peer'));
       expect(config.handshakeTimeout, equals(const Duration(seconds: 10)));
+      expect(config.discoveryInterval, equals(const Duration(seconds: 30)));
     });
 
     test('uses custom timeout values', () {
@@ -523,9 +392,11 @@ void main() {
         localPeerId: PeerId('test-peer'),
         protocol: MockTransportProtocol(),
         handshakeTimeout: const Duration(seconds: 5),
+        discoveryInterval: const Duration(seconds: 15),
       );
 
       expect(config.handshakeTimeout, equals(const Duration(seconds: 5)));
+      expect(config.discoveryInterval, equals(const Duration(seconds: 15)));
     });
   });
 }

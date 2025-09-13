@@ -36,21 +36,25 @@
 ///   print('Received: $text from ${message.senderId.value}');
 /// });
 ///
-/// // Start the transport (starts listening and device discovery)
+/// // Start the transport (starts periodic discovery and automatic handshaking)
 /// await transport.start();
 ///
-/// // Connect to a known peer (if you have the peer ID)
-/// final result = await transport.connectToPeer(PeerId('known-peer'));
-/// if (result.result == ConnectionResult.success) {
-///   // Send a message
-///   final message = TransportMessage(
-///     senderId: config.localPeerId,
-///     recipientId: result.peerId,
-///     data: Uint8List.fromList('Hello!'.codeUnits),
-///     timestamp: DateTime.now(),
-///   );
-///   await transport.sendMessage(message);
-/// }
+/// // Wait for peers to be discovered automatically
+/// transport.peerUpdates.listen((peer) {
+///   if (peer.status == PeerStatus.connected) {
+///     print('New peer connected: ${peer.id.value}');
+///     // Send a message to the connected peer
+///     final message = TransportMessage(
+///       senderId: config.localPeerId,
+///       recipientId: peer.id,
+///       data: Uint8List.fromList('Hello!'.codeUnits),
+///       timestamp: DateTime.now(),
+///     );
+///     transport.sendMessage(message);
+///   }
+/// });
+///
+/// // Peers are discovered and connected automatically - no manual connection needed
 /// ```
 library transport;
 

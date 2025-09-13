@@ -114,11 +114,11 @@ class NearbyTransportProtocol implements TransportProtocol {
 
   void _onConnectionResult(String id, Status status) {
     debugPrint('🔗 Connection result for $id: $status');
+    final transportAddress = DeviceAddress(id);
 
-    _pendingConnections.remove(id);
+    _pendingConnections.remove(transportAddress);
 
     if (status == Status.CONNECTED) {
-      final transportAddress = DeviceAddress(id);
       final displayName =
           _transportAddressToDisplayName[transportAddress] ?? 'Unknown';
       final transportPeer = TransportDevice(
@@ -128,7 +128,7 @@ class NearbyTransportProtocol implements TransportProtocol {
         isActive: true,
       );
       _connectedTransportDevices[transportAddress] = transportPeer;
-      _connectionAttempts.remove(id);
+      _connectionAttempts.remove(transportAddress);
       debugPrint(
         '🎉 Successfully connected to transport peer $id ($displayName) (Total: ${_connectedTransportDevices.length})',
       );
@@ -171,8 +171,8 @@ class NearbyTransportProtocol implements TransportProtocol {
     final transportAddress = DeviceAddress(id);
     _connectedTransportDevices.remove(transportAddress);
     _transportAddressToDisplayName.remove(transportAddress);
-    _pendingConnections.remove(id);
-    _connectionAttempts.remove(id);
+    _pendingConnections.remove(transportAddress);
+    _connectionAttempts.remove(transportAddress);
 
     debugPrint(
       '📊 Remaining transport peers: ${_connectedTransportDevices.length}',
@@ -198,7 +198,7 @@ class NearbyTransportProtocol implements TransportProtocol {
     }
 
     // Skip if we've already tried too many times
-    if ((_connectionAttempts[id] ?? 0) >= _maxConnectionAttempts) {
+    if ((_connectionAttempts[address] ?? 0) >= _maxConnectionAttempts) {
       debugPrint('⚠️ Max attempts reached for $name ($address), skipping');
       return;
     }
