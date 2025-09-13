@@ -41,12 +41,12 @@ class MockTransportProtocol implements TransportProtocol {
   Stream<DeviceAddress> get devicesLost => _devicesLostController.stream;
 
   @override
-  Future<void> startAdvertising() async {
+  Future<void> initialize() async {
     _isListening = true;
   }
 
   @override
-  Future<void> stopAdvertising() async {
+  Future<void> shutdown() async {
     _isListening = false;
   }
 
@@ -61,7 +61,7 @@ class MockTransportProtocol implements TransportProtocol {
   }
 
   @override
-  Future<bool> sendToAddress(DeviceAddress address, Uint8List data) async {
+  Future<bool> sendData(DeviceAddress address, Uint8List data) async {
     // Simulate successful sending
     return true;
   }
@@ -109,6 +109,12 @@ class MockTransportProtocol implements TransportProtocol {
   void simulateConnectionClosed() {
     // Simulate connection closed event
     // This is a no-op in the new model
+  }
+
+  @override
+  Future<void> connectToDevice(DeviceAddress address) async {
+    // Simulate connecting to a device
+    simulateConnectionEvent(address, ConnectionEventType.connected);
   }
 }
 

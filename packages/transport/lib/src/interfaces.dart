@@ -7,43 +7,54 @@ import 'default_implementations.dart';
 /// Abstract interface for low-level transport protocols (e.g., TCP, WebSocket, Bluetooth)
 /// Includes connection management, device discovery, and direct data transmission
 abstract interface class TransportProtocol {
-  /// Start advertising local peer on the network.
-  Future<void> startAdvertising();
+  /// Initializes the transport layer.
+  ///
+  /// This should set up any necessary resources (servers, connections, etc.)
+  /// and prepare the transport to handle incoming and outgoing messages.
+  ///
+  /// Throws [TransportException] if initialization fails.
+  Future<void> initialize();
 
-  /// Stop advertising local peer on the network.
-  Future<void> stopAdvertising();
-
-  /// Start discovering devices on the network
-  Future<void> startDiscovering();
-
-  /// Stop discovering devices on the network
-  Future<void> stopDiscovering();
+  /// Shuts down the transport layer.
+  ///
+  /// This should cleanly close any resources and stop accepting new
+  /// connections or messages. After calling this method, the transport
+  /// should not be used.
+  Future<void> shutdown();
 
   /// Connect to a device.
-  Future<void> connectToDevice(DeviceAddress address);
+  // Future<void> connectToDevice(DeviceAddress address);
 
   /// Send data directly to a device address
-  /// Returns true if the data was sent successfully, false otherwise.
-  Future<bool> sendToAddress(DeviceAddress address, Uint8List data);
+  /// Throws [TransportException] if the operation fails or times out.
+  Future<void> sendData(
+    DeviceAddress address,
+    Uint8List data, {
+    Duration? timeout,
+  });
 
   /// Stream of incoming data with sender address information
   Stream<IncomingData> get incomingData;
 
   /// Stream of connection events (connected/disconnected from addresses)
-  Stream<ConnectionEvent> get connectionEvents;
+  // Stream<ConnectionEvent> get connectionEvents;
 
   /// Stream of newly discovered devices.
   /// You must [connect] to a discovered device before you can communicate with it.
-  Stream<DiscoveredDevice> get devicesDiscovered;
+  // Stream<DiscoveredDevice> get devicesDiscovered;
 
   /// Stream of devices that are no longer available
-  Stream<DeviceAddress> get devicesLost;
+  // Stream<DeviceAddress> get devicesLost;
 
-  /// Whether this transport is currently listening for connections
-  bool get isAdvertising;
-
-  /// Whether discovery is currently active
-  bool get isDiscovering;
+  /// Discovers and returns available transport devices in the network.
+  ///
+  /// This method is used for device discovery and maintenance. The exact
+  /// mechanism depends on the transport implementation (could be multicast,
+  /// centralized discovery service, etc.).
+  ///
+  /// Returns a list of discovered transport devices. May return an empty list if
+  /// no devices are currently available.
+  Future<List<TransportDevice>> discoverDevices();
 }
 
 /// Represents incoming data from a remote peer

@@ -9,347 +9,148 @@ import 'package:transport/transport.dart';
 /// This implementation uses Google's Nearby Connections API to provide
 /// peer-to-peer communication over Wi-Fi, Bluetooth, and Bluetooth LE.
 class NearbyTransportProtocol implements TransportProtocol {
-  /// Service ID for the nearby connections service
   final String serviceId;
+  final String userName;
 
-  /// Display name shown to other devices during discovery
-  final String displayName;
+  // Connection management - transport level devices
+  final Map<DeviceAddress, TransportDevice> _connectedTransportDevices = {};
+  final Map<DeviceAddress, String> _transportAddressToDisplayName = {};
+  final Set<DeviceAddress> _pendingConnections = {};
+  final Map<DeviceAddress, int> _connectionAttempts = {};
 
-  /// Connection strategy to use
-  final Strategy strategy;
-
-  // State management
-  bool _isListening = false;
-  bool _isDiscovering = false;
-
-  // Connected endpoints tracking
-  final Map<String, DeviceAddress> _connectedEndpoints = {};
-  final Map<String, String> _endpointNames = {};
-
-  // Stream controllers
+  // Message handling
   final StreamController<IncomingData> _incomingDataController =
-      StreamController<IncomingData>.broadcast();
-  final StreamController<ConnectionEvent> _connectionEventsController =
-      StreamController<ConnectionEvent>.broadcast();
-  final StreamController<DiscoveredDevice> _devicesDiscoveredController =
-      StreamController<DiscoveredDevice>.broadcast();
-  final StreamController<DeviceAddress> _devicesLostController =
-      StreamController<DeviceAddress>.broadcast();
+      StreamController.broadcast();
 
-  /// Creates a new NearbyTransportProtocol instance
+  bool _initialized = false;
+
+  // Connection settings
+  static const int _maxConnectionAttempts = 3;
+  static const Duration _connectionRetryDelay = Duration(seconds: 2);
+  static const int _maxConcurrentConnections = 8;
+  static const Duration _defaultTimeout = Duration(seconds: 10);
+  static const Duration _connectionThrottleDelay = Duration(milliseconds: 500);
+
+  final Strategy _connectionStrategy;
+
   NearbyTransportProtocol({
     required this.serviceId,
-    required this.displayName,
-    this.strategy = Strategy.P2P_CLUSTER,
-  });
+    required this.userName,
+    Strategy connectionStrategy = Strategy.P2P_CLUSTER,
+  }) : _connectionStrategy = connectionStrategy;
 
   @override
-  Stream<ConnectionEvent> get connectionEvents =>
-      _connectionEventsController.stream;
-
-  @override
-  Stream<DiscoveredDevice> get devicesDiscovered =>
-      _devicesDiscoveredController.stream;
-
-  @override
-  Stream<DeviceAddress> get devicesLost => _devicesLostController.stream;
-
-  @override
-  Stream<IncomingData> get incomingData => _incomingDataController.stream;
-
-  @override
-  bool get isDiscovering => _isDiscovering;
-
-  @override
-  bool get isAdvertising => _isListening;
-
-  @override
-  Future<bool> sendToAddress(DeviceAddress address, Uint8List data) async {
-    try {
-      // Find the endpoint ID for this address
-      // final endpointId = _findEndpointIdForAddress(address);
-      // if (endpointId == null) {
-      //   debugPrint('❌ No endpoint found for address: ${address.value}');
-      //   return false;
-      // }
-
-      // Check if we're connected to this endpoint
-      if (!_connectedEndpoints.containsKey(address.value)) {
-        debugPrint('❌ Not connected to endpoint: ${address.value}');
-        return false;
-      }
-
-      await Nearby().sendBytesPayload(address.value, data);
-      debugPrint('✅ Sent ${data.length} bytes to ${address.value}');
-      return true;
-    } catch (e) {
-      debugPrint('❌ Failed to send data to ${address.value}: $e');
-      return false;
-    }
-  }
-
-  @override
-  Future<void> startDiscovering() async {
-    if (_isDiscovering) {
-      debugPrint('⚠️ Discovery already running');
-      return;
-    }
+  Future<void> initialize() async {
+    if (_initialized) return;
 
     try {
-      await Nearby().startDiscovery(
-        displayName,
-        strategy,
-        onEndpointFound: _onEndpointFound,
-        onEndpointLost: (String? endpointId) {
-          if (endpointId != null) {
-            _onEndpointLost(endpointId);
-          }
-        },
-        serviceId: serviceId,
-      );
+      debugPrint('🚀 Initializing NearbyTransportProtocol for $userName');
 
-      _isDiscovering = true;
-      debugPrint('🔍 Started discovery with service ID: $serviceId');
+      // Start advertising this device
+      await _startAdvertising();
+      debugPrint('📡 Started advertising successfully');
+
+      // Start discovering other devices
+      await _startDiscovery();
+      debugPrint('🔍 Started discovery successfully');
+
+      _initialized = true;
+      debugPrint('✅ NearbyTransportProtocol initialized successfully');
     } catch (e) {
-      debugPrint('❌ Failed to start discovery: $e');
-      throw Exception('Failed to start discovery: $e');
+      debugPrint('❌ Failed to initialize NearbyTransportProtocol: $e');
+      rethrow;
     }
   }
 
-  @override
-  Future<void> startAdvertising() async {
-    if (_isListening) {
-      debugPrint('⚠️ Already advertising');
-      return;
-    }
-
-    try {
-      await Nearby().startAdvertising(
-        displayName,
-        strategy,
-        onConnectionInitiated: _onConnectionInitiated,
-        onConnectionResult: _onConnectionResult,
-        onDisconnected: _onDisconnected,
-        serviceId: serviceId,
-      );
-
-      _isListening = true;
-      debugPrint('📡 Started advertising as: $displayName');
-    } catch (e) {
-      debugPrint('❌ Failed to start listening: $e');
-      throw Exception('Failed to start listening: $e');
-    }
-  }
-
-  @override
-  Future<void> stopDiscovering() async {
-    if (!_isDiscovering) {
-      debugPrint('⚠️ Discovery not running');
-      return;
-    }
-
-    try {
-      await Nearby().stopDiscovery();
-      _isDiscovering = false;
-      debugPrint('🛑 Stopped discovery');
-    } catch (e) {
-      debugPrint('❌ Failed to stop discovery: $e');
-      throw Exception('Failed to stop discovery: $e');
-    }
-  }
-
-  @override
-  Future<void> stopAdvertising() async {
-    if (!_isListening) {
-      debugPrint('⚠️ Not advertising');
-      return;
-    }
-
-    try {
-      await Nearby().stopAdvertising();
-
-      // Disconnect from all connected endpoints
-      for (final endpointId in _connectedEndpoints.keys.toList()) {
-        await Nearby().disconnectFromEndpoint(endpointId);
-      }
-
-      _connectedEndpoints.clear();
-      _endpointNames.clear();
-      _isListening = false;
-      debugPrint('🛑 Stopped listening and disconnected all endpoints');
-    } catch (e) {
-      debugPrint('❌ Failed to stop listening: $e');
-      throw Exception('Failed to stop listening: $e');
-    }
-  }
-
-  /// Dispose of resources and close streams
-  Future<void> dispose() async {
-    await stopAdvertising();
-    await stopDiscovering();
-
-    if (!_incomingDataController.isClosed) {
-      await _incomingDataController.close();
-    }
-    if (!_connectionEventsController.isClosed) {
-      await _connectionEventsController.close();
-    }
-    if (!_devicesDiscoveredController.isClosed) {
-      await _devicesDiscoveredController.close();
-    }
-    if (!_devicesLostController.isClosed) {
-      await _devicesLostController.close();
-    }
-
-    debugPrint('🧹 NearbyTransportProtocol disposed');
-  }
-
-  // Private callback methods
-
-  void _onEndpointFound(
-    String endpointId,
-    String endpointName,
-    String serviceId,
-  ) {
-    debugPrint('👋 Found device: $endpointName ($endpointId)');
-
-    _endpointNames[endpointId] = endpointName;
-
-    final device = DiscoveredDevice(
-      address: DeviceAddress(endpointId),
-      displayName: endpointName,
-      discoveredAt: DateTime.now(),
-      metadata: {
-        'service_id': serviceId,
-        'endpoint_id': endpointId,
-        'transport_type': 'nearby_connections',
-      },
+  Future<void> _startAdvertising() async {
+    debugPrint('📡 Starting advertising with strategy: $_connectionStrategy');
+    await Nearby().startAdvertising(
+      userName,
+      _connectionStrategy,
+      onConnectionInitiated: _onConnectionInitiated,
+      onConnectionResult: _onConnectionResult,
+      onDisconnected: _onDisconnected,
+      serviceId: serviceId,
     );
-
-    if (!_devicesDiscoveredController.isClosed) {
-      _devicesDiscoveredController.add(device);
-    }
   }
 
-  void _onEndpointLost(String endpointId) {
-    final endpointName = _endpointNames[endpointId] ?? 'Unknown';
-    debugPrint('👋 Lost device: $endpointName ($endpointId)');
+  Future<void> _startDiscovery() async {
+    debugPrint('🔍 Starting discovery with strategy: $_connectionStrategy');
+    await Nearby().startDiscovery(
+      userName,
+      _connectionStrategy,
+      onEndpointFound: _onEndpointFound,
+      onEndpointLost: _onEndpointLost,
+      serviceId: serviceId,
+    );
+  }
 
-    _endpointNames.remove(endpointId);
+  void _onConnectionInitiated(String id, ConnectionInfo info) {
+    debugPrint('🤝 Connection initiated with $id: ${info.endpointName}');
 
-    final address = DeviceAddress(endpointId);
-    if (!_devicesLostController.isClosed) {
-      _devicesLostController.add(address);
-    }
-
-    // If we were connected, mark as disconnected
-    if (_connectedEndpoints.containsKey(endpointId)) {
-      _connectedEndpoints.remove(endpointId);
-
-      final event = ConnectionEvent(
-        address: address,
-        type: ConnectionEventType.disconnected,
-        timestamp: DateTime.now(),
-      );
-
-      if (!_connectionEventsController.isClosed) {
-        _connectionEventsController.add(event);
+    // Check connection limits before accepting
+    if (_connectedTransportDevices.length >= _maxConcurrentConnections) {
+      debugPrint('❌ Connection limit reached, rejecting connection from $id');
+      try {
+        Nearby().rejectConnection(id);
+      } catch (e) {
+        debugPrint('❌ Failed to reject connection with $id: $e');
       }
+      return;
     }
-  }
-
-  void _onConnectionInitiated(
-    String endpointId,
-    ConnectionInfo connectionInfo,
-  ) {
-    final endpointName =
-        _endpointNames[endpointId] ?? connectionInfo.endpointName;
-    debugPrint('🤝 Connection initiated with: $endpointName ($endpointId)');
-
-    // Store the endpoint name
-    _endpointNames[endpointId] = endpointName;
 
     // Auto-accept all connections
-    // In a production app, you might want to show a dialog or use a policy
-    Nearby().acceptConnection(
-      endpointId,
-      onPayLoadRecieved: _onPayloadReceived,
-      onPayloadTransferUpdate: _onPayloadTransferUpdate,
-    );
-  }
-
-  void _onConnectionResult(String endpointId, Status status) {
-    final endpointName = _endpointNames[endpointId] ?? 'Unknown';
-    final address = DeviceAddress(endpointId);
-
-    if (status == Status.CONNECTED) {
-      debugPrint('✅ Connected to: $endpointName ($endpointId)');
-
-      _connectedEndpoints[endpointId] = address;
-
-      final event = ConnectionEvent(
-        address: address,
-        type: ConnectionEventType.connected,
-        timestamp: DateTime.now(),
+    try {
+      Nearby().acceptConnection(
+        id,
+        onPayLoadRecieved: _onPayloadReceived,
+        onPayloadTransferUpdate: _onPayloadTransferUpdate,
       );
-
-      if (!_connectionEventsController.isClosed) {
-        _connectionEventsController.add(event);
-      }
-    } else {
-      debugPrint(
-        '❌ Failed to connect to: $endpointName ($endpointId) - $status',
-      );
-
-      _connectedEndpoints.remove(endpointId);
-
-      final event = ConnectionEvent(
-        address: address,
-        type: ConnectionEventType.disconnected,
-        timestamp: DateTime.now(),
-      );
-
-      if (!_connectionEventsController.isClosed) {
-        _connectionEventsController.add(event);
-      }
+      debugPrint('✅ Auto-accepted connection with $id');
+    } catch (e) {
+      debugPrint('❌ Failed to accept connection with $id: $e');
     }
   }
 
-  void _onDisconnected(String endpointId) {
-    final endpointName = _endpointNames[endpointId] ?? 'Unknown';
-    debugPrint('👋 Disconnected from: $endpointName ($endpointId)');
+  void _onConnectionResult(String id, Status status) {
+    debugPrint('🔗 Connection result for $id: $status');
 
-    final address = DeviceAddress(endpointId);
-    _connectedEndpoints.remove(endpointId);
+    _pendingConnections.remove(id);
 
-    final event = ConnectionEvent(
-      address: address,
-      type: ConnectionEventType.disconnected,
-      timestamp: DateTime.now(),
-    );
-
-    if (!_connectionEventsController.isClosed) {
-      _connectionEventsController.add(event);
+    if (status == Status.CONNECTED) {
+      final transportAddress = DeviceAddress(id);
+      final displayName =
+          _transportAddressToDisplayName[transportAddress] ?? 'Unknown';
+      final transportPeer = TransportDevice(
+        address: transportAddress,
+        displayName: displayName,
+        connectedAt: DateTime.now(),
+        isActive: true,
+      );
+      _connectedTransportDevices[transportAddress] = transportPeer;
+      _connectionAttempts.remove(id);
+      debugPrint(
+        '🎉 Successfully connected to transport peer $id ($displayName) (Total: ${_connectedTransportDevices.length})',
+      );
+    } else {
+      _connectedTransportDevices.remove(DeviceAddress(id));
+      debugPrint('❌ Connection failed with $id: $status');
     }
   }
 
   void _onPayloadReceived(String endpointId, Payload payload) {
-    if (payload.bytes != null) {
-      final address = DeviceAddress(endpointId);
+    final address = DeviceAddress(endpointId);
+    final bytes = payload.bytes;
+    if (payload.type == PayloadType.BYTES && bytes != null) {
+      debugPrint('Received ${bytes.length} bytes from $address');
 
       final incomingData = IncomingData(
-        data: payload.bytes!,
         fromAddress: address,
+        data: payload.bytes!,
         timestamp: DateTime.now(),
       );
 
-      debugPrint(
-        '📨 Received ${payload.bytes!.length} bytes from: $endpointId',
-      );
-
-      if (!_incomingDataController.isClosed) {
-        _incomingDataController.add(incomingData);
-      }
+      _incomingDataController.add(incomingData);
     }
   }
 
@@ -357,38 +158,164 @@ class NearbyTransportProtocol implements TransportProtocol {
     String endpointId,
     PayloadTransferUpdate update,
   ) {
-    // Handle payload transfer updates if needed
-    // This could be used for progress tracking on large transfers
     if (update.status == PayloadStatus.SUCCESS) {
-      debugPrint('✅ Payload transfer completed to/from: $endpointId');
+      debugPrint('✅ Payload transfer successful to $endpointId');
     } else if (update.status == PayloadStatus.FAILURE) {
-      debugPrint('❌ Payload transfer failed to/from: $endpointId');
+      debugPrint('❌ Payload transfer failed to $endpointId');
     }
   }
 
-  /// Request connection to a discovered device.
-  @override
-  Future<void> connectToDevice(DeviceAddress address) async {
-    final endpointId = address.value;
+  void _onDisconnected(String id) {
+    debugPrint('💔 Disconnected from transport peer $id');
 
-    if (_connectedEndpoints.containsKey(endpointId)) {
-      debugPrint('⚠️ Already connected to: $endpointId');
+    final transportAddress = DeviceAddress(id);
+    _connectedTransportDevices.remove(transportAddress);
+    _transportAddressToDisplayName.remove(transportAddress);
+    _pendingConnections.remove(id);
+    _connectionAttempts.remove(id);
+
+    debugPrint(
+      '📊 Remaining transport peers: ${_connectedTransportDevices.length}',
+    );
+  }
+
+  void _onEndpointFound(String id, String name, String serviceId) {
+    final address = DeviceAddress(id);
+    debugPrint(
+      '🎯 FOUND DEVICE! Address: $address, Name: $name, Service: $serviceId',
+    );
+
+    // Store display name for later use
+    _transportAddressToDisplayName[address] = name;
+
+    // Check connection limits before attempting connection
+    if (_connectedTransportDevices.length + _pendingConnections.length >=
+        _maxConcurrentConnections) {
+      debugPrint(
+        '⚠️ Connection limit reached, skipping connection to $name ($address)',
+      );
       return;
     }
 
+    // Skip if we've already tried too many times
+    if ((_connectionAttempts[id] ?? 0) >= _maxConnectionAttempts) {
+      debugPrint('⚠️ Max attempts reached for $name ($address), skipping');
+      return;
+    }
+
+    // Throttle connection attempts
+    Future.delayed(_connectionThrottleDelay, () {
+      if (!_connectedTransportDevices.containsKey(address) &&
+          !_pendingConnections.contains(address)) {
+        _requestConnection(address, name);
+      }
+    });
+  }
+
+  void _onEndpointLost(String? id) {
+    if (id != null) {
+      debugPrint('📤 Lost device: $id');
+      final transportAddress = DeviceAddress(id);
+      _connectedTransportDevices.remove(transportAddress);
+      _transportAddressToDisplayName.remove(transportAddress);
+    }
+  }
+
+  void _requestConnection(DeviceAddress address, String name) async {
+    // Check if already connected or pending
+    if (_connectedTransportDevices.containsKey(address) ||
+        _pendingConnections.contains(address)) {
+      debugPrint(
+        '⚠️ Connection to $name ($address) already exists or is pending',
+      );
+      return;
+    }
+
+    // Check connection attempts
+    final attempts = _connectionAttempts[address] ?? 0;
+    if (attempts >= _maxConnectionAttempts) {
+      debugPrint('❌ Max connection attempts reached for $name ($address)');
+      return;
+    }
+
+    _pendingConnections.add(address);
+    _connectionAttempts[address] = attempts + 1;
+
+    debugPrint(
+      '📞 Requesting connection to $name ($address) (attempt ${attempts + 1}/$_maxConnectionAttempts)',
+    );
+
     try {
       await Nearby().requestConnection(
-        displayName,
-        endpointId,
+        userName,
+        address.value,
         onConnectionInitiated: _onConnectionInitiated,
         onConnectionResult: _onConnectionResult,
         onDisconnected: _onDisconnected,
       );
-
-      debugPrint('📞 Requested connection to: $endpointId');
     } catch (e) {
-      debugPrint('❌ Failed to request connection to $endpointId: $e');
-      throw Exception('Failed to request connection: $e');
+      debugPrint('❌ Failed to request connection to $address: $e');
+      _pendingConnections.remove(address);
+
+      if (attempts + 1 < _maxConnectionAttempts) {
+        Timer(_connectionRetryDelay, () {
+          _requestConnection(address, name);
+        });
+      }
+    }
+  }
+
+  @override
+  Future<void> sendData(
+    DeviceAddress address,
+    Uint8List data, {
+    Duration? timeout = _defaultTimeout,
+  }) async {
+    await Nearby().sendBytesPayload(address.value, data);
+  }
+
+  @override
+  Stream<IncomingData> get incomingData => _incomingDataController.stream;
+
+  @override
+  Future<List<TransportDevice>> discoverDevices() async {
+    if (!_initialized) {
+      throw StateError('Transport not initialized');
+    }
+
+    return _connectedTransportDevices.values.toList();
+  }
+
+  @override
+  Future<void> shutdown() async {
+    if (!_initialized) return;
+
+    try {
+      debugPrint('🛑 Shutting down NearbyTransportProtocol...');
+
+      // Stop Nearby Connections services
+      await Nearby().stopAdvertising();
+      debugPrint('⏹️ Stopped advertising');
+
+      await Nearby().stopDiscovery();
+      debugPrint('⏹️ Stopped discovery');
+
+      await Nearby().stopAllEndpoints();
+      debugPrint('⏹️ Stopped all endpoints');
+
+      // Close streams
+      await _incomingDataController.close();
+
+      // Clear state
+      _connectedTransportDevices.clear();
+      _transportAddressToDisplayName.clear();
+      _pendingConnections.clear();
+      _connectionAttempts.clear();
+      _initialized = false;
+
+      debugPrint('✅ NearbyTransportProtocol shut down successfully');
+    } catch (e) {
+      debugPrint('❌ Error shutting down transport: $e');
     }
   }
 }

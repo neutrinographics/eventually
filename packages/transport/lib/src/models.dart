@@ -1,6 +1,65 @@
 import 'dart:typed_data';
 
+class TransportDevice {
+  /// Network address where this device can be reached
+  final DeviceAddress address;
+
+  /// Display name discovered during peer discovery.
+  final String displayName;
+
+  /// When this transport peer was connected.
+  final DateTime connectedAt;
+
+  /// Whether this transport peer is currently active.
+  final bool isActive;
+
+  /// Optional metadata about this transport peer.
+  final Map<String, dynamic> metadata;
+
+  /// Constructor for TransportDevice
+  TransportDevice({
+    required this.address,
+    required this.displayName,
+    required this.connectedAt,
+    this.isActive = true,
+    this.metadata = const {},
+  });
+
+  /// Creates a copy with modified values.
+  TransportDevice copyWith({
+    DeviceAddress? address,
+    String? displayName,
+    DateTime? connectedAt,
+    bool? isActive,
+    Map<String, dynamic>? metadata,
+  }) {
+    return TransportDevice(
+      address: address ?? this.address,
+      displayName: displayName ?? this.displayName,
+      connectedAt: connectedAt ?? this.connectedAt,
+      isActive: isActive ?? this.isActive,
+      metadata: metadata ?? this.metadata,
+    );
+  }
+
+  @override
+  String toString() {
+    return 'TransportDevice(address: $address, displayName: $displayName, isActive: $isActive)';
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! TransportDevice) return false;
+    return address == other.address;
+  }
+
+  @override
+  int get hashCode => address.hashCode;
+}
+
 /// Represents a discovered device on the network (before peer identification)
+@Deprecated('Use TransportDevice instead')
 class DiscoveredDevice {
   const DiscoveredDevice({
     required this.address,

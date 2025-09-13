@@ -87,8 +87,7 @@ class TransportManager {
 
     try {
       // Start listening and discovery
-      await _config.protocol.startAdvertising();
-      await _config.protocol.startDiscovering();
+      await _config.protocol.initialize();
 
       // Load existing peers from store
       final store = _config.peerStore;
@@ -113,12 +112,7 @@ class TransportManager {
     _isStarted = false;
 
     // Stop protocol operations
-    if (_config.protocol.isDiscovering) {
-      await _config.protocol.stopDiscovering();
-    }
-    if (_config.protocol.isAdvertising) {
-      await _config.protocol.stopAdvertising();
-    }
+    await _config.protocol.shutdown();
 
     // Clear pending handshakes
     _pendingHandshakes.clear();
@@ -164,7 +158,7 @@ class TransportManager {
     final messageData = _serializeMessage(message);
 
     // Send directly to peer's address
-    return await _config.protocol.sendToAddress(peer.address, messageData);
+    return await _config.protocol.sendData(peer.address, messageData);
   }
 
   /// Connect to a peer by address (initiate handshake)
@@ -200,7 +194,7 @@ class TransportManager {
       final markedData = _markAsHandshake(handshakeData, handshakeId);
 
       // Send handshake
-      final success = await _config.protocol.sendToAddress(address, markedData);
+      final success = await _config.protocol.sendData(address, markedData);
       if (!success) {
         _pendingHandshakes.remove(handshakeId);
         return ConnectionAttemptResult(
@@ -329,7 +323,7 @@ class TransportManager {
                 responseData,
                 handshakeId,
               );
-              await _config.protocol.sendToAddress(
+              await _config.protocol.sendData(
                 incomingData.fromAddress,
                 markedResponse,
               );
@@ -362,6 +356,12 @@ class TransportManager {
           ? PeerStatus.connected
           : PeerStatus.disconnected;
       _updatePeerStatus(peerId, newStatus);
+    } else {
+      connectToPeer(event.address).then((result) {
+        if (result.result != ConnectionResult.success) {
+          print('Auto-handshake failed for ${event.address}: ${result.error}');
+        }
+      });
     }
   }
 
