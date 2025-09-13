@@ -401,6 +401,8 @@ class ChatService with ChangeNotifier {
     switch (peer.status) {
       case PeerStatus.connected:
         _updatePeerPresence(peer.id, UserPresence.online);
+        // Announce all our existing blocks to the newly connected peer
+        _announceHistoricBlocks();
         break;
       case PeerStatus.disconnected:
       case PeerStatus.failed:
@@ -517,6 +519,21 @@ class ChatService with ChangeNotifier {
       await _synchronizer.addBlock(block);
     } catch (e) {
       debugPrint('⚠️ Failed to announce presence: $e');
+    }
+  }
+
+  /// Announces all existing blocks to newly connected peers
+  Future<void> _announceHistoricBlocks() async {
+    try {
+      // Get all CIDs from the DAG
+      final allCids = _dag.cids.toSet();
+
+      if (allCids.isNotEmpty) {
+        debugPrint('📢 Announcing ${allCids.length} historic blocks to peers');
+        await _synchronizer.announceBlocks(allCids);
+      }
+    } catch (e) {
+      debugPrint('⚠️ Failed to announce historic blocks: $e');
     }
   }
 
